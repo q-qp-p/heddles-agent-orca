@@ -79,12 +79,15 @@ spec:
 
 | Field | Description |
 |---|---|
-| `strategy` | `rule-based` (default), `llm-meta`, or `hybrid` |
+| `strategy` | `rule-based` (default), `llm-meta`, `hybrid`, or `switchyard` |
 | `providers` | List of `{name, weight}` for probabilistic routing |
 | `fallbackChain` | Ordered providers to try on 429/5xx errors |
 | `budgetCap` | Max USD spend `perRun` and/or `perDay` |
-| `capabilityRouting` | Map of capability tag → provider name |
+| `capabilityRouting` | Map of capability tag → provider name. The keys `capable`, `efficient`, `judge` and `subagent.<group>` are roles for `switchyard`, not keyword tags |
 | `metaRouter` | Config for the LLM that decides routing (llm-meta/hybrid) |
+| `switchyard` | The Switchyard algorithm spec for `strategy: switchyard`; required for it and rejected otherwise. See [Switchyard routing](switchyard-routing.md) |
+
+**Status:** `conditions` (`ProvidersResolved`, `SwitchyardValid`, `Ready`), `observedGeneration`, and `activeProviders` (the selector's providers that exist and are Ready).
 
 ```yaml
 apiVersion: agentorca.agentorca.io/v1alpha1

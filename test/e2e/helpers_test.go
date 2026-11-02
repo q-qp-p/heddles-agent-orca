@@ -178,7 +178,12 @@ type httpResult struct {
 // postChatCompletion sends a minimal chat completion request to the model-router.
 func postChatCompletion(localPort int, token string) httpResult {
 	GinkgoHelper()
-	payload := `{"model":"default","messages":[{"role":"user","content":"e2e"}]}`
+	return postChat(localPort, token, `{"model":"default","messages":[{"role":"user","content":"e2e"}]}`)
+}
+
+// postChat sends the given chat completion request body to the model-router.
+func postChat(localPort int, token, payload string) httpResult {
+	GinkgoHelper()
 	req, err := http.NewRequest("POST",
 		fmt.Sprintf("http://127.0.0.1:%d/v1/chat/completions", localPort),
 		bytes.NewBufferString(payload),

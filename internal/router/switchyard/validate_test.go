@@ -220,3 +220,24 @@ func TestFillToolSemantics_RejectsNonJSON(t *testing.T) {
 		t.Error("accepted a spec that is not JSON")
 	}
 }
+
+func TestRequiredGroups(t *testing.T) {
+	tests := []struct {
+		spec string
+		want []string
+	}{
+		{stageSpec, []string{"capable", "efficient"}},
+		{compositeSpec, []string{"capable", "efficient", "judge"}},
+		{`{"type":"auto","capable_target":"strong","efficient_target":"weak"}`, []string{"capable", "efficient"}},
+		{`{"type":"plan_execute","capable_target":"strong","efficient_target":"weak"}`, []string{"capable", "efficient"}},
+		{`{"type":"random","targets":["strong"]}`, nil},
+		{`{"type":"passthrough","target":"strong"}`, nil},
+		{`{"type":"llm_classifier"}`, nil}, // not covered by the upstream documentation: Switchyard decides
+		{`nope`, nil},
+	}
+	for _, tt := range tests {
+		if got := RequiredGroups(json.RawMessage(tt.spec)); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("RequiredGroups(%s) = %v, want %v", tt.spec, got, tt.want)
+		}
+	}
+}

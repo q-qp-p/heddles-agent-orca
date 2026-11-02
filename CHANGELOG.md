@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`switchyard` ModelSelector strategy and a ModelSelector controller** — a ModelSelector can now
+  set `strategy: switchyard` with a Switchyard algorithm in `spec.switchyard` (required for the
+  strategy and rejected for the others; `capabilityRouting` keys `capable`, `efficient`, `judge` and
+  `subagent.<group>` are roles). The ModelSelector controller, which was an empty scaffold, now
+  reports `ProvidersResolved`, `SwitchyardValid` (Switchyard itself validates the algorithm, once per
+  spec change) and `Ready` conditions, `observedGeneration`, and `activeProviders`; it never blocks a
+  run. The model-router of a `switchyard` selector gets a 512Mi memory limit instead of 256Mi. Runs and
+  deployments resolve their selector through one shared function. Samples:
+  `config/samples/switchyard-*.yaml`. See `docs/switchyard-routing.md`.
 - **Switchyard selector in the model-router** — with `strategy: switchyard` in its config, the
   sidecar routes each call with a Switchyard algorithm (`stage_router`, `llm_classifier`,
   `composite`, `plan_execute`, `auto`, `random`, `passthrough`, `subagents`): which provider is eligible

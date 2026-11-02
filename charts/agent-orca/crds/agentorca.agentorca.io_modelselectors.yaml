@@ -18,9 +18,9 @@ spec:
     - jsonPath: .spec.strategy
       name: Strategy
       type: string
-    - jsonPath: .spec.providers
-      name: Providers
-      type: integer
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -72,6 +72,11 @@ spec:
                 description: |-
                   CapabilityRouting maps capability tags to preferred provider names.
                   Example: {"code": "gpt-4o", "reasoning": "claude-sonnet", "fast": "llama3-local"}
+
+                  The keys capable, efficient and judge are roles, not keyword tags: with
+                  strategy switchyard they name the provider an algorithm treats as its capable
+                  tier, its efficient tier and its LLM judge. subagent.<group> keys do the same for
+                  delegated sub-agent work. Role keys are never matched against message text.
                 type: object
               fallbackChain:
                 description: |-
@@ -136,25 +141,49 @@ spec:
                   - rule-based: deterministic routing via capability tags, cost, and latency SLOs
                   - llm-meta:   a cheap LLM decides which model to use for each request
                   - hybrid:     rule-based fast path with LLM meta-router for low-confidence cases
+                  - switchyard: an NVIDIA NeMo Switchyard routing algorithm chooses (see spec.switchyard);
+                                the rule router decides whenever it cannot
                 enum:
                 - rule-based
                 - llm-meta
                 - hybrid
+                - switchyard
                 type: string
+              switchyard:
+                description: |-
+                  Switchyard is the Switchyard algorithm spec used by strategy "switchyard", for
+                  example {"type": "stage_router", "picker": "efficient_first", "capable_target":
+                  "claude-opus", "efficient_target": "claude-haiku", "confidence_threshold": 0.5}.
+                  Targets are ModelProvider names. The controller validates it and reports the
+                  result in the SwitchyardValid condition; see docs/switchyard-routing.md for the
+                  algorithms that are served and the schema of each.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
             required:
             - providers
             type: object
+            x-kubernetes-validations:
+            - message: spec.switchyard is required for strategy switchyard
+              rule: '!has(self.strategy) || self.strategy != ''switchyard'' || has(self.switchyard)'
+            - message: spec.switchyard is only used with strategy switchyard
+              rule: '!has(self.switchyard) || (has(self.strategy) && self.strategy
+                == ''switchyard'')'
           status:
             description: ModelSelectorStatus defines the observed state of a ModelSelector.
             properties:
               activeProviders:
-                description: ActiveProviders lists ModelProvider names that are currently
-                  healthy.
+                description: |-
+                  ActiveProviders lists the ModelProviders of this selector (its providers and
+                  fallback chain) that exist and are Ready, sorted.
                 items:
                   type: string
                 type: array
               conditions:
-                description: Conditions holds standard Kubernetes conditions.
+                description: |-
+                  Conditions holds standard Kubernetes conditions:
+                  - ProvidersResolved: every provider the spec names exists in the namespace
+                  - SwitchyardValid:   the Switchyard algorithm is served and accepted (strategy switchyard)
+                  - Ready:             all of the above hold
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -213,6 +242,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: ObservedGeneration is the spec generation the conditions
+                  describe.
+                format: int64
+                type: integer
             type: object
         type: object
     served: true

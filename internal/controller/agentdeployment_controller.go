@@ -218,7 +218,7 @@ func (r *AgentDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// Create or update the underlying Kubernetes Deployment.
-	if err := r.reconcileDeployment(ctx, &deployment, &agent, saName, tokenSecretName, routerConfigHash, providerVolumes, providerMounts, toolSecretVolumes, toolSecretMounts, mcpBinVolumes, mcpBinMounts); err != nil {
+	if err := r.reconcileDeployment(ctx, &deployment, &agent, saName, tokenSecretName, routerConfigHash, routerCfg.Strategy, providerVolumes, providerMounts, toolSecretVolumes, toolSecretMounts, mcpBinVolumes, mcpBinMounts); err != nil {
 		log.Error("failed to reconcile Deployment", "error", err)
 		deployment.Status.Phase = agentorcav1alpha1.AgentDeploymentPhaseFailed
 		deployment.Status.Message = err.Error()
@@ -281,6 +281,7 @@ func (r *AgentDeploymentReconciler) reconcileDeployment(
 	saName string,
 	tokenSecretName string,
 	routerConfigHash string,
+	routerStrategy string,
 	providerVolumes []corev1.Volume,
 	providerMounts []corev1.VolumeMount,
 	toolSecretVolumes []corev1.Volume,
@@ -341,6 +342,7 @@ func (r *AgentDeploymentReconciler) reconcileDeployment(
 	agentSecretVolumes, agentSecretMounts := podbuilder.ResolveAgentSecretRefs(agent)
 
 	pod := podbuilder.Build(podbuilder.PodConfig{
+		RouterStrategy:           routerStrategy,
 		HindsightAPIKeySecretRef: hindsightKeyRef(r.HindsightAPIKey),
 		Namespace:                namespace,
 		Labels:                   labels,
@@ -470,40 +472,17 @@ func (r *AgentDeploymentReconciler) buildDeploymentRouterConfig( //nolint:gocycl
 		return nil, fmt.Errorf("getting ModelSelector %q: %w", agent.Spec.ModelSelectorRef, err)
 	}
 
-	var providers []router.ProviderConfig
-	seenProviders := make(map[string]bool)
-	for _, pw := range selector.Spec.Providers {
-		var mp agentorcav1alpha1.ModelProvider
-		if err := r.Get(ctx, client.ObjectKey{Name: pw.Name, Namespace: deploy.Namespace}, &mp); err != nil {
-			return nil, fmt.Errorf("getting ModelProvider %q: %w", pw.Name, err)
-		}
-		seenProviders[pw.Name] = true
-		apiKeyFile := fmt.Sprintf("%s/%s/api-key", podbuilder.ProviderSecretsDir, pw.Name)
-		providers = append(providers, providerConfigFromSpec(pw.Name, &mp, pw.Weight, pw.RoutingHint, apiKeyFile))
+	routing, err := resolveSelectorRouting(ctx, r.Client, deploy.Namespace, &selector)
+	if err != nil {
+		return nil, err
 	}
-	// Load fallback chain providers with Weight=0 so tryFallback can find them
-	// but they are excluded from weighted primary selection.
-	for _, name := range selector.Spec.FallbackChain {
-		if seenProviders[name] {
-			continue
+	for _, name := range routing.SkippedFallbacks {
+		if r.Recorder != nil {
+			r.Recorder.Eventf(deploy, corev1.EventTypeWarning, "FallbackProviderSkipped",
+				"fallback provider %q not deployed; skipped from chain", name)
 		}
-		seenProviders[name] = true
-		var mp agentorcav1alpha1.ModelProvider
-		if err := r.Get(ctx, client.ObjectKey{Name: name, Namespace: deploy.Namespace}, &mp); err != nil {
-			if apierrors.IsNotFound(err) {
-				// Provider is listed in the fallback chain but not deployed (e.g. disabled
-				// in the model-providers chart). Skip it rather than blocking the deployment.
-				if r.Recorder != nil {
-					r.Recorder.Eventf(deploy, corev1.EventTypeWarning, "FallbackProviderSkipped",
-						"fallback provider %q not deployed; skipped from chain", name)
-				}
-				continue
-			}
-			return nil, fmt.Errorf("getting fallback ModelProvider %q: %w", name, err)
-		}
-		apiKeyFile := fmt.Sprintf("%s/%s/api-key", podbuilder.ProviderSecretsDir, name)
-		providers = append(providers, providerConfigFromSpec(name, &mp, 0, "", apiKeyFile))
 	}
+	providers := routing.Providers
 
 	var toolDefs []router.ToolDefinition
 	var mcpServers []router.MCPServerConfig
@@ -832,20 +811,6 @@ func (r *AgentDeploymentReconciler) buildDeploymentRouterConfig( //nolint:gocycl
 		}
 	}
 
-	var budget float64
-	if selector.Spec.BudgetCap != nil {
-		budget = parseFloat(selector.Spec.BudgetCap.PerRun)
-	}
-
-	threshold := 0.6
-	if selector.Spec.MetaRouter != nil && selector.Spec.MetaRouter.Threshold != "" {
-		threshold = parseFloat(selector.Spec.MetaRouter.Threshold)
-	}
-	metaRouterProvider := ""
-	if selector.Spec.MetaRouter != nil {
-		metaRouterProvider = selector.Spec.MetaRouter.ProviderRef
-	}
-
 	checkpointEvery := 1
 	if agent.Spec.Memory != nil {
 		checkpointEvery = agent.Spec.Memory.CheckpointEvery
@@ -891,12 +856,13 @@ func (r *AgentDeploymentReconciler) buildDeploymentRouterConfig( //nolint:gocycl
 		DisableClarify:             agent.Spec.DisableClarify,
 		LocalTools:                 agent.Spec.Runtime.LocalTools,
 		Providers:                  providers,
-		Strategy:                   selector.Spec.Strategy,
-		CapabilityRouting:          selector.Spec.CapabilityRouting,
-		FallbackChain:              selector.Spec.FallbackChain,
-		MetaRouterProviderName:     metaRouterProvider,
-		MetaRouterThreshold:        threshold,
-		BudgetPerRunUSD:            budget,
+		Strategy:                   routing.Strategy,
+		Switchyard:                 routing.Switchyard,
+		CapabilityRouting:          routing.CapabilityRouting,
+		FallbackChain:              routing.FallbackChain,
+		MetaRouterProviderName:     routing.MetaRouterProviderName,
+		MetaRouterThreshold:        routing.MetaRouterThreshold,
+		BudgetPerRunUSD:            routing.BudgetPerRunUSD,
 		ToolDefinitions:            toolDefs,
 		MCPServers:                 mcpServers,
 		CheckpointEvery:            checkpointEvery,
@@ -1487,7 +1453,7 @@ func (r *AgentDeploymentReconciler) reconcileWarmPool(
 		if err != nil {
 			return fmt.Errorf("creating warm pod token secret: %w", err)
 		}
-		pod := r.buildWarmPod(deploy, agent, saName, warmTokenName, routerConfigHash, providerVolumes, providerMounts, toolSecretVolumes, toolSecretMounts, mcpBinVolumes, mcpBinMounts)
+		pod := r.buildWarmPod(deploy, agent, saName, warmTokenName, routerConfigHash, routerCfg.Strategy, providerVolumes, providerMounts, toolSecretVolumes, toolSecretMounts, mcpBinVolumes, mcpBinMounts)
 		if err := ctrl.SetControllerReference(deploy, pod, r.Scheme); err != nil {
 			return fmt.Errorf("setting warm pod owner ref: %w", err)
 		}
@@ -1608,6 +1574,7 @@ func (r *AgentDeploymentReconciler) buildWarmPod(
 	saName string,
 	tokenSecretName string,
 	routerConfigHash string,
+	routerStrategy string,
 	providerVolumes []corev1.Volume,
 	providerMounts []corev1.VolumeMount,
 	toolSecretVolumes []corev1.Volume,
@@ -1633,6 +1600,7 @@ func (r *AgentDeploymentReconciler) buildWarmPod(
 		webhookNotifyRef = deploy.Spec.WebhookNotify.WebhookSecretRef
 	}
 	return podbuilder.Build(podbuilder.PodConfig{
+		RouterStrategy:           routerStrategy,
 		HindsightAPIKeySecretRef: hindsightKeyRef(r.HindsightAPIKey),
 		GenerateName:             "warm-" + deploy.Name + "-",
 		Namespace:                deploy.Namespace,

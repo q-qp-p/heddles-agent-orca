@@ -1,0 +1,61 @@
+# Let a small model judge each task before the stage router takes over: an easy,
+# well-bounded task starts on the cheap model, a hard one on the capable model. The
+# judge is an ordinary model call (its cost is charged to the run), so it belongs
+# on a cheap, fast provider. Here it is the same cheap provider that answers; a
+# provider with weight 0 would judge without ever answering.
+#
+# With fail_open: true a failing judge does not fail the decision: Switchyard
+# routes without its verdict. With false, the decision fails and the rule router
+# picks a provider instead, recorded as switchyard-failopen.
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelProvider
+metadata:
+  name: claude-haiku
+  namespace: agent-orca-system
+spec:
+  litellmModel: anthropic/claude-haiku-4-5
+  credentialsRef: {name: anthropic-credentials, key: api-key}
+  constraints:
+    contextWindow: 200000
+    costPerMillionInputTokens: "1.00"
+    costPerMillionOutputTokens: "5.00"
+---
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelProvider
+metadata:
+  name: claude-opus
+  namespace: agent-orca-system
+spec:
+  litellmModel: anthropic/claude-opus-4-5
+  credentialsRef: {name: anthropic-credentials, key: api-key}
+  constraints:
+    contextWindow: 200000
+    costPerMillionInputTokens: "5.00"
+    costPerMillionOutputTokens: "25.00"
+---
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelSelector
+metadata:
+  name: judged-coding
+  namespace: agent-orca-system
+spec:
+  strategy: switchyard
+  providers:
+    - {name: claude-haiku, weight: 100}
+    - {name: claude-opus, weight: 100}
+  fallbackChain: [claude-opus, claude-haiku]
+  capabilityRouting:
+    capable: claude-opus
+    efficient: claude-haiku
+    judge: claude-haiku
+  switchyard:
+    type: composite
+    classifier:
+      target: claude-haiku
+      base_threshold: 0.5 # route to the efficient model when the judge scores the task at least this solvable
+      classify_trigger: user_turn
+      fail_open: true # a failing judge does not fail the decision
+    stage:
+      capable_target: claude-opus
+      efficient_target: claude-haiku
+      confidence_threshold: 0.5

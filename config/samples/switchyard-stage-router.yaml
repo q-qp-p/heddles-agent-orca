@@ -1,0 +1,54 @@
+# Route by where the agent is in its run, with NVIDIA NeMo Switchyard's stage
+# router. Routine work (editing files, running tests that pass) goes to the cheap
+# model; the capable model takes over after repeated failures, and the cheap one
+# is the fallback if the capable one is down. No judge, so no extra model calls.
+#
+# The roles under capabilityRouting say which provider plays each tier. The
+# algorithm names providers directly. See docs/switchyard-routing.md.
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelProvider
+metadata:
+  name: claude-haiku
+  namespace: agent-orca-system
+spec:
+  litellmModel: anthropic/claude-haiku-4-5
+  credentialsRef: {name: anthropic-credentials, key: api-key}
+  capabilities: [fast, code]
+  constraints:
+    contextWindow: 200000
+    costPerMillionInputTokens: "1.00"
+    costPerMillionOutputTokens: "5.00"
+---
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelProvider
+metadata:
+  name: claude-opus
+  namespace: agent-orca-system
+spec:
+  litellmModel: anthropic/claude-opus-4-5
+  credentialsRef: {name: anthropic-credentials, key: api-key}
+  capabilities: [reasoning, code, vision]
+  constraints:
+    contextWindow: 200000
+    costPerMillionInputTokens: "5.00"
+    costPerMillionOutputTokens: "25.00"
+---
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelSelector
+metadata:
+  name: adaptive-coding
+  namespace: agent-orca-system
+spec:
+  strategy: switchyard
+  providers:
+    - {name: claude-haiku, weight: 100}
+    - {name: claude-opus, weight: 100}
+  capabilityRouting:
+    capable: claude-opus
+    efficient: claude-haiku
+  switchyard:
+    type: stage_router
+    picker: efficient_first # the cheap model is the default when the signals are unclear
+    capable_target: claude-opus
+    efficient_target: claude-haiku
+    confidence_threshold: 0.5

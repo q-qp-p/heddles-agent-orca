@@ -20,6 +20,7 @@ limitations under the License.
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -261,5 +262,183 @@ spec:
 		for _, banned := range []string{"prompt,", "response", "content", "message", "output"} {
 			Expect(cols).NotTo(ContainSubstring(banned), "routing_events must hold metadata only")
 		}
+	})
+
+	// Strategy switchyard end to end: the controller validates the algorithm, the
+	// router asks Switchyard which provider serves a call, and an algorithm that
+	// cannot be served still gets answered.
+	Context("with a switchyard selector", Ordered, func() {
+		const (
+			goodRun = "e2e-sy-good"
+			badRun  = "e2e-sy-bad"
+		)
+
+		// A conversation whose tool calls keep failing: the stage router escalates.
+		failingConversation := func() string {
+			msgs := []map[string]any{{"role": "user", "content": "Fix the failing test in parser.go"}}
+			for i := range 5 {
+				id := fmt.Sprintf("call_%d", i)
+				msgs = append(msgs,
+					map[string]any{"role": "assistant", "content": "", "tool_calls": []any{map[string]any{
+						"id": id, "type": "function",
+						"function": map[string]any{"name": "Bash", "arguments": `{"command":"go test ./..."}`},
+					}}},
+					map[string]any{"role": "tool", "tool_call_id": id,
+						"content": "Traceback (most recent call last):\n  File x\nError: command failed with exit code 1\nFAILED tests/test_parser.py::test_x"})
+			}
+			b, err := json.Marshal(map[string]any{"model": "default", "messages": msgs})
+			Expect(err).NotTo(HaveOccurred())
+			return string(b)
+		}
+
+		conditionReason := func(selector, condType string) string {
+			out, err := utils.Run(exec.Command("kubectl", "get", "modelselector", selector, "-n", ns, "-o",
+				fmt.Sprintf(`jsonpath={.status.conditions[?(@.type=="%s")].reason}`, condType)))
+			Expect(err).NotTo(HaveOccurred())
+			return strings.TrimSpace(out)
+		}
+
+		BeforeAll(func() {
+			By("creating providers, two selectors and a run on each")
+			stage := `{"type":"stage_router","picker":"efficient_first","capable_target":"e2e-sy-strong","efficient_target":"e2e-sy-weak","confidence_threshold":0.5}`
+			Expect(applyYAML(fmt.Sprintf(`
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelProvider
+metadata: {name: e2e-sy-weak, namespace: %[1]s}
+spec:
+  litellmModel: "openai/weak"
+  baseURL: "http://fakellm.%[1]s.svc:8080"
+  credentialsRef: {name: e2e-routing-key, key: api-key}
+  constraints: {contextWindow: 128000, costPerMillionInputTokens: "1.00", costPerMillionOutputTokens: "5.00"}
+---
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelProvider
+metadata: {name: e2e-sy-strong, namespace: %[1]s}
+spec:
+  litellmModel: "openai/strong"
+  baseURL: "http://fakellm.%[1]s.svc:8080"
+  credentialsRef: {name: e2e-routing-key, key: api-key}
+  constraints: {contextWindow: 128000, costPerMillionInputTokens: "5.00", costPerMillionOutputTokens: "25.00"}
+---
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelSelector
+metadata: {name: e2e-sy-good, namespace: %[1]s}
+spec:
+  strategy: switchyard
+  providers: [{name: e2e-sy-weak, weight: 100}, {name: e2e-sy-strong, weight: 100}]
+  capabilityRouting: {capable: e2e-sy-strong, efficient: e2e-sy-weak}
+  switchyard: %[2]s
+---
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: ModelSelector
+metadata: {name: e2e-sy-bad, namespace: %[1]s}
+spec:
+  strategy: switchyard
+  providers: [{name: e2e-sy-weak, weight: 100}, {name: e2e-sy-strong, weight: 100}]
+  capabilityRouting: {capable: e2e-sy-strong, efficient: e2e-sy-weak}
+  switchyard: {type: advisor}
+`, ns, stage))).To(Succeed())
+			for _, c := range []struct{ run, sel string }{{goodRun, "e2e-sy-good"}, {badRun, "e2e-sy-bad"}} {
+				Expect(applyYAML(fmt.Sprintf(`
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: Agent
+metadata: {name: %[1]s-agent, namespace: %[3]s}
+spec:
+  modelSelectorRef: %[2]s
+  runtime:
+    ociRef: "busybox:1.36"
+    framework: openai-compatible
+    command: ["sleep"]
+    args: ["infinity"]
+`, c.run, c.sel, ns))).To(Succeed())
+			}
+			// The AgentRun webhook can lag right after the operator was rolled.
+			for _, run := range []string{goodRun, badRun} {
+				manifest := fmt.Sprintf(`
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: %[1]s
+  namespace: %[2]s
+  annotations: {agentorca.io/enforcement-mode: "off"}
+spec:
+  agentRef: %[1]s-agent
+  input: "switchyard e2e"
+`, run, ns)
+				Eventually(func() error { return applyYAML(manifest) }, 3*time.Minute, 5*time.Second).Should(Succeed())
+			}
+		})
+
+		AfterAll(func() {
+			for _, run := range []string{goodRun, badRun} {
+				deleteResource("agentrun", run, ns)
+				deleteResource("agent", run+"-agent", ns)
+			}
+			for _, sel := range []string{"e2e-sy-good", "e2e-sy-bad"} {
+				deleteResource("modelselector", sel, ns)
+			}
+			for _, mp := range []string{"e2e-sy-weak", "e2e-sy-strong"} {
+				deleteResource("modelprovider", mp, ns)
+			}
+		})
+
+		It("reports a valid algorithm and an unsupported one", func() {
+			Eventually(func() string { return conditionReason("e2e-sy-good", "SwitchyardValid") },
+				2*time.Minute, 3*time.Second).Should(Equal("Valid"))
+			Eventually(func() string { return conditionReason("e2e-sy-bad", "SwitchyardValid") },
+				2*time.Minute, 3*time.Second).Should(Equal("UnsupportedAlgorithm"))
+			Expect(conditionReason("e2e-sy-good", "Ready")).To(Equal("ChecksPassed"))
+			Expect(conditionReason("e2e-sy-bad", "Ready")).To(Equal("ChecksFailed"))
+		})
+
+		It("gives the router of a switchyard selector more memory", func() {
+			pod := "agentorca-run-" + goodRun
+			waitForPodRunning(pod, ns)
+			out, err := utils.Run(exec.Command("kubectl", "get", "pod", pod, "-n", ns, "-o",
+				`jsonpath={.spec.initContainers[?(@.name=="model-router")].resources.limits.memory}{.spec.containers[?(@.name=="model-router")].resources.limits.memory}`))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(strings.TrimSpace(out)).To(Equal("512Mi"))
+		})
+
+		It("routes by what the agent's tools report", func() {
+			pod := "agentorca-run-" + goodRun
+			waitForPodRunning(pod, ns)
+			token := getRunToken(goodRun, ns)
+			cleanup := portForward(ns, "pod/"+pod, localPort+1, routerPort)
+			defer cleanup()
+
+			// No tool history yet: the stage router takes its default, the efficient model.
+			Expect(postChatCompletion(localPort+1, token).Status).To(Equal(200))
+			// A conversation of failing tool calls: it escalates to the capable model.
+			Expect(postChat(localPort+1, token, failingConversation()).Status).To(Equal(200))
+
+			count := func(provider, label string) int {
+				n, _ := strconv.Atoi(psql(fmt.Sprintf(
+					"select count(*) from routing_events where run_name='%s' and provider='%s' and path='switchyard' and algorithm='stage_router' and sy_label='%s'",
+					goodRun, provider, label)))
+				return n
+			}
+			Eventually(func() int { return count("e2e-sy-weak", "fall_open") }, 60*time.Second, 2*time.Second).
+				Should(Equal(1), "the first call should go to the efficient model by the picker default")
+			Eventually(func() int { return count("e2e-sy-strong", "override") }, 60*time.Second, 2*time.Second).
+				Should(Equal(1), "failing tool calls should escalate to the capable model")
+		})
+
+		It("still answers a run whose algorithm cannot be served", func() {
+			pod := "agentorca-run-" + badRun
+			waitForPodRunning(pod, ns)
+			token := getRunToken(badRun, ns)
+			cleanup := portForward(ns, "pod/"+pod, localPort+2, routerPort)
+			defer cleanup()
+
+			res := postChatCompletion(localPort+2, token)
+			Expect(res.Status).To(Equal(200))
+			Expect(res.Body).To(ContainSubstring("[DONE]"))
+			Eventually(func() int {
+				n, _ := strconv.Atoi(psql(fmt.Sprintf(
+					"select count(*) from routing_events where run_name='%s' and path='switchyard-failopen'", badRun)))
+				return n
+			}, 60*time.Second, 2*time.Second).Should(Equal(1), "the rule router should have decided, and said so")
+		})
 	})
 })

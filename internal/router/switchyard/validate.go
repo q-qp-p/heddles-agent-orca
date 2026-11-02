@@ -132,6 +132,30 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
+// RequiredGroups lists the model groups an algorithm cannot run without, which a
+// ModelSelector supplies through capabilityRouting roles. Switchyard only
+// discovers a missing one when it routes, and the router then falls back to the
+// rule router for every request; this lets a controller say so up front.
+//
+// It is deliberately conservative: only groups the upstream documentation lists
+// as required are returned, so an algorithm it does not cover reports none and
+// leaves Switchyard to judge.
+func RequiredGroups(spec json.RawMessage) []string {
+	var t struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(spec, &t) != nil {
+		return nil
+	}
+	switch t.Type {
+	case "composite":
+		return []string{"capable", "efficient", "judge"}
+	case "stage_router", "auto", "plan_execute":
+		return []string{"capable", "efficient"}
+	}
+	return nil
+}
+
 // ToolSemantics are tool names grouped by what using them says about the agent's
 // progress: Observe is investigation, Mutate is production.
 type ToolSemantics struct {

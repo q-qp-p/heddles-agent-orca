@@ -18,15 +18,20 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ModelSelectorSpec defines a routing policy across one or more ModelProviders.
+// +kubebuilder:validation:XValidation:rule="!has(self.strategy) || self.strategy != 'switchyard' || has(self.switchyard)",message="spec.switchyard is required for strategy switchyard"
+// +kubebuilder:validation:XValidation:rule="!has(self.switchyard) || (has(self.strategy) && self.strategy == 'switchyard')",message="spec.switchyard is only used with strategy switchyard"
 type ModelSelectorSpec struct {
 	// Strategy determines how the model-router selects a provider for each request.
 	// - rule-based: deterministic routing via capability tags, cost, and latency SLOs
 	// - llm-meta:   a cheap LLM decides which model to use for each request
 	// - hybrid:     rule-based fast path with LLM meta-router for low-confidence cases
-	// +kubebuilder:validation:Enum=rule-based;llm-meta;hybrid
+	// - switchyard: an NVIDIA NeMo Switchyard routing algorithm chooses (see spec.switchyard);
+	//               the rule router decides whenever it cannot
+	// +kubebuilder:validation:Enum=rule-based;llm-meta;hybrid;switchyard
 	// +kubebuilder:default=rule-based
 	// +optional
 	Strategy string `json:"strategy,omitempty"`
@@ -47,12 +52,28 @@ type ModelSelectorSpec struct {
 
 	// CapabilityRouting maps capability tags to preferred provider names.
 	// Example: {"code": "gpt-4o", "reasoning": "claude-sonnet", "fast": "llama3-local"}
+	//
+	// The keys capable, efficient and judge are roles, not keyword tags: with
+	// strategy switchyard they name the provider an algorithm treats as its capable
+	// tier, its efficient tier and its LLM judge. subagent.<group> keys do the same for
+	// delegated sub-agent work. Role keys are never matched against message text.
 	// +optional
 	CapabilityRouting map[string]string `json:"capabilityRouting,omitempty"`
 
 	// MetaRouter configures the LLM meta-router used in "llm-meta" and "hybrid" strategies.
 	// +optional
 	MetaRouter *MetaRouterConfig `json:"metaRouter,omitempty"`
+
+	// Switchyard is the Switchyard algorithm spec used by strategy "switchyard", for
+	// example {"type": "stage_router", "picker": "efficient_first", "capable_target":
+	// "claude-opus", "efficient_target": "claude-haiku", "confidence_threshold": 0.5}.
+	// Targets are ModelProvider names. The controller validates it and reports the
+	// result in the SwitchyardValid condition; see docs/switchyard-routing.md for the
+	// algorithms that are served and the schema of each.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Type=object
+	Switchyard *runtime.RawExtension `json:"switchyard,omitempty"`
 }
 
 // ProviderWeight pairs a ModelProvider name with a routing weight.
@@ -105,11 +126,19 @@ type MetaRouterConfig struct {
 
 // ModelSelectorStatus defines the observed state of a ModelSelector.
 type ModelSelectorStatus struct {
-	// ActiveProviders lists ModelProvider names that are currently healthy.
+	// ObservedGeneration is the spec generation the conditions describe.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// ActiveProviders lists the ModelProviders of this selector (its providers and
+	// fallback chain) that exist and are Ready, sorted.
 	// +optional
 	ActiveProviders []string `json:"activeProviders,omitempty"`
 
-	// Conditions holds standard Kubernetes conditions.
+	// Conditions holds standard Kubernetes conditions:
+	// - ProvidersResolved: every provider the spec names exists in the namespace
+	// - SwitchyardValid:   the Switchyard algorithm is served and accepted (strategy switchyard)
+	// - Ready:             all of the above hold
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -119,7 +148,7 @@ type ModelSelectorStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Strategy",type=string,JSONPath=`.spec.strategy`
-// +kubebuilder:printcolumn:name="Providers",type=integer,JSONPath=`.spec.providers`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // ModelSelector defines a routing policy across multiple ModelProviders.
