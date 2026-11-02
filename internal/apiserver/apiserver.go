@@ -40,8 +40,11 @@ import (
 
 	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentorcav1alpha1 "github.com/heddles/agent-orca/api/v1alpha1"
@@ -407,16 +410,31 @@ func (s *Server) failAgentRun(w http.ResponseWriter, r *http.Request, namespace,
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// maxRoutingDecisions bounds AgentRun.status.routingDecisions. A long run
+// makes one decision per LLM call; unbounded, the list would grow the object
+// toward the etcd size limit. The full history lives in routing telemetry.
+const maxRoutingDecisions = 100
+
+// routingDecisionBackoff retries a routing-decision append that lost a write
+// race. client-go's default (5 steps, 10ms) is tuned for one competing
+// writer; a busy run can have several decisions in flight.
+var routingDecisionBackoff = wait.Backoff{Steps: 12, Duration: 10 * time.Millisecond, Factor: 1.5, Jitter: 0.2}
+
 // recordRoutingDecision appends a runtime routing decision to the AgentRun status.
-// Called by the model-router sidecar after each selectProvider() call so the UI
-// can show which model was actually chosen, including meta-router escalations.
+// Called by the model-router sidecar after each selection so the UI can show
+// which model was actually chosen, including meta-router escalations and
+// fallbacks.
 func (s *Server) recordRoutingDecision(w http.ResponseWriter, r *http.Request, namespace, name string) {
 	var req struct {
-		Model      string `json:"model"`
-		Provider   string `json:"provider"`
-		Strategy   string `json:"strategy"`
-		Reason     string `json:"reason"`
-		Confidence string `json:"confidence"`
+		Model            string `json:"model"`
+		Provider         string `json:"provider"`
+		Strategy         string `json:"strategy"`
+		Reason           string `json:"reason"`
+		Confidence       string `json:"confidence"`
+		DecisionID       string `json:"decisionID"`
+		Path             string `json:"path"`
+		Category         string `json:"category"`
+		ParentDecisionID string `json:"parentDecisionID"`
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
 	if err != nil {
@@ -428,23 +446,44 @@ func (s *Server) recordRoutingDecision(w http.ResponseWriter, r *http.Request, n
 		return
 	}
 
-	var run agentorcav1alpha1.AgentRun
-	if err := s.crdClient.Get(r.Context(), client.ObjectKey{Name: name, Namespace: namespace}, &run); err != nil {
-		http.Error(w, fmt.Sprintf("getting AgentRun: %v", err), http.StatusNotFound)
-		return
-	}
-
-	patch := client.MergeFrom(run.DeepCopy())
-	now := metav1.Now()
-	run.Status.RoutingDecisions = append(run.Status.RoutingDecisions, agentorcav1alpha1.RoutingDecision{
-		Model:      req.Model,
-		Provider:   req.Provider,
-		Strategy:   req.Strategy,
-		Reason:     req.Reason,
-		Confidence: req.Confidence,
-		Timestamp:  &now,
+	// Several decisions can land at once (a fallback post races the next
+	// request's), so the append is a read-modify-write guarded by the object's
+	// resourceVersion: a conflicting writer makes this one retry on fresh state.
+	var notFound bool
+	err = retry.RetryOnConflict(routingDecisionBackoff, func() error {
+		var run agentorcav1alpha1.AgentRun
+		if err := s.crdClient.Get(r.Context(), client.ObjectKey{Name: name, Namespace: namespace}, &run); err != nil {
+			if apierrors.IsNotFound(err) {
+				notFound = true
+			}
+			return err
+		}
+		patch := client.MergeFromWithOptions(run.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		now := metav1.Now()
+		// Decisions the controller seeded count toward the total too.
+		run.Status.RoutingDecisionsTotal = max(run.Status.RoutingDecisionsTotal, len(run.Status.RoutingDecisions)) + 1
+		run.Status.RoutingDecisions = append(run.Status.RoutingDecisions, agentorcav1alpha1.RoutingDecision{
+			Model:            req.Model,
+			Provider:         req.Provider,
+			Strategy:         req.Strategy,
+			Reason:           req.Reason,
+			Confidence:       req.Confidence,
+			Timestamp:        &now,
+			DecisionID:       req.DecisionID,
+			Path:             req.Path,
+			Category:         req.Category,
+			ParentDecisionID: req.ParentDecisionID,
+		})
+		if extra := len(run.Status.RoutingDecisions) - maxRoutingDecisions; extra > 0 {
+			run.Status.RoutingDecisions = slices.Clone(run.Status.RoutingDecisions[extra:])
+		}
+		return s.crdClient.Status().Patch(r.Context(), &run, patch)
 	})
-	if err := s.crdClient.Status().Patch(r.Context(), &run, patch); err != nil {
+	if err != nil {
+		if notFound {
+			http.Error(w, fmt.Sprintf("getting AgentRun: %v", err), http.StatusNotFound)
+			return
+		}
 		http.Error(w, fmt.Sprintf("patching AgentRun status: %v", err), http.StatusInternalServerError)
 		return
 	}

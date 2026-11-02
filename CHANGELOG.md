@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Routing decision identity and a `Selector` seam** — every routing decision now carries a
+  decision ID (UUIDv7), the rule or meta-router path that made it, and the task stage
+  (`tool-exec`, `code`, `summarize`, `chat`). They appear in the `routing` trace event and in
+  `status.routingDecisions` (`decisionID`, `path`, `category`, `parentDecisionID`). A fallback
+  after a provider failure is recorded as its own decision pointing at the one it replaced.
+  Provider selection moved behind a `Selector` interface in `internal/router`; the existing
+  rule and meta-router logic is its first implementation. `internal/router/testdata/routing`
+  holds golden routing fixtures (`go test ./internal/router -run TestRoutingGolden -update`).
 - **Hindsight API-key authentication** (`hindsight.apiKeySecret` chart value, fixes the
   application-level half of #58) — the model-router sends
   `Authorization: Bearer <key>` on hindsight bank/recall/retain calls so hindsight can
@@ -139,6 +147,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strict clients (previously rejected with `-32602 Invalid params`).
 
 ### Fixed
+
+- **Routing rules that never fired** — the router passed a zero token estimate and no
+  timeout to the rule router, so the `maxRequestTokens` filter, the large-context rule and
+  the near-timeout rule were dead. They now run. Runs with large conversations, a provider
+  `maxRequestTokens`, or a `spec.timeout` can be routed to a different provider than before.
+- **Weight-0 providers could win the budget, timeout and context rules** — providers reserved
+  for the fallback chain and meta-router escalation are now skipped by those rules (and by
+  vision routing, unless no weighted provider has the capability).
+- **Capability keyword routing was order-dependent** — keys are matched in sorted order, and
+  the role/stage keys `capable`, `efficient`, `judge`, `any`, `stage:*` and `subagent.*` are
+  reserved and never matched against message text.
+- **Meta-router prompts to Anthropic providers** — they were sent in OpenAI format to the
+  Messages endpoint and always failed. The meta-router now uses the same provider
+  forwarders as normal calls, with a 15s timeout.
+- **Meta-router saw its own history twice** — the conversation was prepended a second time
+  before routing, skewing keyword matching and the decision cache key. The run's budget,
+  timeout and turn state now also reach the meta-router cache key as designed.
+- **Duplicate and lost routing decisions** — each LLM call used to post a second, re-rolled
+  decision (it could disagree with the real one) and concurrent posts overwrote each other.
+  A call now posts one decision; posts use an optimistic lock, and `status.routingDecisions`
+  keeps the most recent 100 (`status.routingDecisionsTotal` counts all of them).
 
 - ACP sessions showed a truncated or empty final response when an agent ended its turn
   with `_done(output=...)` (#74): the answer rides only the terminal `done` trace

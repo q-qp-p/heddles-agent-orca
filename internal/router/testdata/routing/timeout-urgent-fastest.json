@@ -1,0 +1,48 @@
+{
+  "description": "Past 70% of the run timeout picks a weighted fast provider",
+  "providers": [
+    {
+      "name": "cheap",
+      "weight": 5,
+      "capabilities": [
+        "code"
+      ],
+      "contextWindow": 128000,
+      "costPerInputToken": 1.5e-7,
+      "latencyProfile": "fast"
+    },
+    {
+      "name": "big",
+      "weight": 3,
+      "capabilities": [
+        "vision",
+        "reasoning"
+      ],
+      "contextWindow": 1000000,
+      "costPerInputToken": 0.000003,
+      "latencyProfile": "medium"
+    },
+    {
+      "name": "reserve",
+      "weight": 0,
+      "capabilities": [
+        "vision"
+      ],
+      "contextWindow": 10000000,
+      "latencyProfile": "fast"
+    }
+  ],
+  "elapsedSec": 90,
+  "messages": [
+    {
+      "role": "user",
+      "content": "x"
+    }
+  ],
+  "remainingTimeoutSec": 10,
+  "expect": {
+    "provider": "cheap",
+    "path": "rule:timeout",
+    "stage": "chat"
+  }
+}

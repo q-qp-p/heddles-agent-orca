@@ -507,17 +507,33 @@ spec:
                 description: |-
                   RoutingDecisions records the model routing decisions made during this run.
                   Populated by the controller from the resolved ModelSelector configuration
-                  and updated by the model-router sidecar at runtime.
+                  and updated by the model-router sidecar at runtime. It holds the most
+                  recent decisions only (see RoutingDecisionsTotal).
                 items:
                   description: RoutingDecision records a single model routing decision
                     made during an AgentRun.
                   properties:
+                    category:
+                      description: Category is the task stage the request was classified
+                        as.
+                      type: string
                     confidence:
                       description: Confidence is a 0.0–1.0 score indicating routing
                         confidence.
                       type: string
+                    decisionID:
+                      description: DecisionID identifies this decision across traces,
+                        status and telemetry.
+                      type: string
                     model:
                       description: Model is the selected model identifier (e.g. "anthropic/claude-sonnet-4-6").
+                      type: string
+                    parentDecisionID:
+                      description: ParentDecisionID is the decision a fallback replaced.
+                      type: string
+                    path:
+                      description: 'Path names what decided: a rule path, the meta-router,
+                        or a fallback.'
                       type: string
                     provider:
                       description: Provider is the ModelProvider CRD name that was
@@ -540,6 +556,11 @@ spec:
                   - provider
                   type: object
                 type: array
+              routingDecisionsTotal:
+                description: |-
+                  RoutingDecisionsTotal counts every decision recorded during this run,
+                  including those that have rolled out of RoutingDecisions.
+                type: integer
               sandboxDecisionsSeen:
                 description: |-
                   SandboxDecisionsSeen is the time of the last sandbox network decision

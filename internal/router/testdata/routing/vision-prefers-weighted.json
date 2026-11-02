@@ -1,0 +1,50 @@
+{
+  "description": "An image routes to the weighted vision provider, not the weight-0 reserve",
+  "providers": [
+    {
+      "name": "cheap",
+      "weight": 5,
+      "capabilities": [
+        "code"
+      ],
+      "contextWindow": 128000,
+      "costPerInputToken": 1.5e-7,
+      "latencyProfile": "fast"
+    },
+    {
+      "name": "big",
+      "weight": 3,
+      "capabilities": [
+        "vision",
+        "reasoning"
+      ],
+      "contextWindow": 1000000,
+      "costPerInputToken": 0.000003,
+      "latencyProfile": "medium"
+    },
+    {
+      "name": "reserve",
+      "weight": 0,
+      "capabilities": [
+        "vision"
+      ],
+      "contextWindow": 10000000,
+      "latencyProfile": "fast"
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image_url"
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "provider": "big",
+    "path": "rule:vision",
+    "stage": "chat"
+  }
+}

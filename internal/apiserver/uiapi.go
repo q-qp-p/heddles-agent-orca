@@ -420,6 +420,9 @@ func (s *UIServer) handleRunOrStream(w http.ResponseWriter, r *http.Request) {
 			Strategy:   rd.Strategy,
 			Reason:     rd.Reason,
 			Confidence: rd.Confidence,
+			DecisionID: rd.DecisionID,
+			Path:       rd.Path,
+			Category:   rd.Category,
 		}
 		if rd.Timestamp != nil {
 			d.Timestamp = rd.Timestamp.UTC().Format(time.RFC3339)
@@ -446,10 +449,13 @@ func (s *UIServer) handleStream(w http.ResponseWriter, r *http.Request, ns, runN
 
 	ctx := r.Context()
 
+	// emittedRouting counts decisions by absolute position: status keeps only
+	// the most recent ones, so a slice index alone would stall once it is full.
 	var emittedRouting int
 	emitRoutingDecisions := func(run *agentorcav1alpha1.AgentRun) {
-		for i := emittedRouting; i < len(run.Status.RoutingDecisions); i++ {
-			rd := run.Status.RoutingDecisions[i]
+		var fresh []agentorcav1alpha1.RoutingDecision
+		fresh, emittedRouting = routingDecisionsSince(run, emittedRouting)
+		for _, rd := range fresh {
 			if strings.HasPrefix(rd.Reason, "configured provider") {
 				continue
 			}
@@ -462,7 +468,6 @@ func (s *UIServer) handleStream(w http.ResponseWriter, r *http.Request, ns, runN
 				"confidence": conf,
 			})
 		}
-		emittedRouting = len(run.Status.RoutingDecisions)
 	}
 
 	emitTerminal := func(run *agentorcav1alpha1.AgentRun) bool {
@@ -2288,6 +2293,18 @@ type traceEntryJSON struct {
 	ChildRunName string          `json:"childRunName,omitempty"`
 }
 
+// routingDecisionsSince returns the routing decisions of run recorded after the
+// first emitted ones, and the new emitted count. Counts are absolute positions
+// over every decision ever recorded: status holds only the most recent, so the
+// first held decision sits at RoutingDecisionsTotal minus the held count (0
+// when the total was never set).
+func routingDecisionsSince(run *agentorcav1alpha1.AgentRun, emitted int) ([]agentorcav1alpha1.RoutingDecision, int) {
+	held := run.Status.RoutingDecisions
+	base := max(0, run.Status.RoutingDecisionsTotal-len(held))
+	from := min(len(held), max(0, emitted-base))
+	return held[from:], base + len(held)
+}
+
 type routingDecisionJSON struct {
 	Model      string `json:"model"`
 	Provider   string `json:"provider"`
@@ -2295,6 +2312,11 @@ type routingDecisionJSON struct {
 	Reason     string `json:"reason"`
 	Confidence string `json:"confidence"`
 	Timestamp  string `json:"timestamp,omitempty"`
+	// DecisionID, Path and Category identify the decision and what decided it;
+	// they match the AgentRun status field names so archived runs decode too.
+	DecisionID string `json:"decisionID,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Category   string `json:"category,omitempty"`
 }
 
 type archivedRunDetail struct {

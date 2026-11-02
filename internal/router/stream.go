@@ -193,7 +193,6 @@ func (r *Router) forwardToProviderStream(ctx context.Context, provider *Provider
 		cancel()
 		return nil, fmt.Errorf("provider %s returned %d: %s", provider.Name, resp.StatusCode, body)
 	}
-	go r.postRoutingDecision(llmCtx, provider, r.ruleRouter.Route(r.messages, 0, 0))
 	// Caller owns resp.Body; cancel the context when the body is closed.
 	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
 	return resp, nil

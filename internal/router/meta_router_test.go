@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const (
@@ -48,6 +49,15 @@ func fakeMetaProviderConfig(baseURL, apiKeyFile string, order int) *Config {
 			{Name: b, LiteLLMModel: b, BaseURL: baseURL, APIKeyFile: apiKeyFile},
 		},
 		MetaRouterProviderName: a,
+	}
+}
+
+// testMetaForward returns the forwarder a Router would bind to its
+// meta-router: the real provider forwarders, bounded like production.
+func testMetaForward(cfg *Config) chatForwarder {
+	r := &Router{cfg: cfg}
+	return func(ctx context.Context, p *ProviderConfig, req ChatCompletionRequest) ([]byte, error) {
+		return r.forwardToProviderWithin(ctx, p, req, metaRouterTimeout)
 	}
 }
 
@@ -147,7 +157,7 @@ func TestResolveProviderName(t *testing.T) {
 			for _, n := range tt.providers {
 				cfg.Providers = append(cfg.Providers, ProviderConfig{Name: n})
 			}
-			m := NewMetaRouter(cfg)
+			m := NewMetaRouter(cfg, testMetaForward(cfg))
 			got, ok := m.resolveProviderName(tt.raw)
 			if got != tt.want || ok != tt.wantOK {
 				t.Errorf("resolveProviderName(%q) = (%q, %v), want (%q, %v)", tt.raw, got, ok, tt.want, tt.wantOK)
@@ -163,7 +173,7 @@ func TestRouteResolvesMiniRegardlessOfProviderOrder(t *testing.T) {
 			srv := fakeMetaLLMServer(t, testProviderMini)
 			defer srv.Close()
 			cfg := fakeMetaProviderConfig(srv.URL, apiKeyFile, order)
-			m := NewMetaRouter(cfg)
+			m := NewMetaRouter(cfg, testMetaForward(cfg))
 			name, _, err := m.Route(context.Background(), []Message{{Role: "user", Content: "hi"}})
 			if err != nil {
 				t.Fatalf("Route: %v", err)
@@ -180,7 +190,7 @@ func TestRouteCacheKeyRespectsStateBuckets(t *testing.T) {
 	srv := fakeMetaLLMServer(t, testProviderMini)
 	defer srv.Close()
 	cfg := fakeMetaProviderConfig(srv.URL, apiKeyFile, 0)
-	m := NewMetaRouter(cfg)
+	m := NewMetaRouter(cfg, testMetaForward(cfg))
 	msgs := []Message{{Role: "user", Content: "same task"}}
 
 	// First call caches under the high-budget bucket.
@@ -240,7 +250,7 @@ func TestRouteCacheHitReturnsCachedProvider(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := fakeMetaProviderConfig(srv.URL, apiKeyFile, 0)
-	m := NewMetaRouter(cfg)
+	m := NewMetaRouter(cfg, testMetaForward(cfg))
 	msgs := []Message{{Role: "user", Content: "cache me"}}
 	state := RoutingState{BudgetUSD: 5, SpentUSD: 1}
 
@@ -260,12 +270,56 @@ func TestRouteBlankResponseErrors(t *testing.T) {
 	srv := fakeMetaLLMServer(t, "   ")
 	defer srv.Close()
 	cfg := fakeMetaProviderConfig(srv.URL, apiKeyFile, 0)
-	m := NewMetaRouter(cfg)
+	m := NewMetaRouter(cfg, testMetaForward(cfg))
 	_, _, err := m.Route(context.Background(), []Message{{Role: "user", Content: "hi"}})
 	if err == nil {
 		t.Fatal("expected error for blank meta-router response")
 	}
 	if !strings.Contains(err.Error(), "unknown provider") {
 		t.Errorf("expected unknown-provider error, got: %v", err)
+	}
+}
+
+// Regression: the meta-router sent an OpenAI-shaped body with Bearer auth to
+// Anthropic's Messages endpoint, so routing through an Anthropic provider
+// always failed. It now speaks each provider's own wire format.
+func TestMetaRouter_AnthropicProviderUsesMessagesAPI(t *testing.T) {
+	captured := captureHTTP(t, `{"id":"msg_1","content":[{"type":"text","text":"gpt-4o"}],"stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":1}}`)
+	keyFile := filepath.Join(t.TempDir(), "api-key")
+	if err := os.WriteFile(keyFile, []byte("sk-ant-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{
+		LLMRequestTimeout: time.Minute,
+		Providers: []ProviderConfig{
+			{Name: "claude", LiteLLMModel: "anthropic/claude-sonnet-5-5", APIKeyFile: keyFile},
+			{Name: testProviderFull, LiteLLMModel: "openai/gpt-4o", APIKeyFile: keyFile},
+		},
+		MetaRouterProviderName: "claude",
+	}
+	m := NewMetaRouter(cfg, testMetaForward(cfg))
+
+	name, usage, err := m.Route(context.Background(), []Message{{Role: "user", Content: "route me"}})
+	if err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	if name != testProviderFull {
+		t.Errorf("provider = %q, want %q", name, testProviderFull)
+	}
+	if usage.PromptTokens != 7 {
+		t.Errorf("usage = %+v, want the Anthropic usage mapped through", usage)
+	}
+	if captured.URL.String() != anthropicMessagesURL {
+		t.Errorf("url = %s, want %s", captured.URL, anthropicMessagesURL)
+	}
+	if captured.Header.Get("x-api-key") != "sk-ant-test" || captured.Header.Get("Authorization") != "" {
+		t.Errorf("auth headers = %v, want x-api-key and no Bearer", captured.Header)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(captured.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["model"] != "claude-sonnet-5-5" || body["max_tokens"] != float64(50) || body["temperature"] != float64(0) {
+		t.Errorf("body = %v, want bare model, max_tokens 50, temperature 0", body)
 	}
 }

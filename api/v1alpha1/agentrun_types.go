@@ -290,6 +290,22 @@ type RoutingDecision struct {
 	// Timestamp is when the routing decision was made.
 	// +optional
 	Timestamp *metav1.Time `json:"timestamp,omitempty"`
+
+	// DecisionID identifies this decision across traces, status and telemetry.
+	// +optional
+	DecisionID string `json:"decisionID,omitempty"`
+
+	// Path names what decided: a rule path, the meta-router, or a fallback.
+	// +optional
+	Path string `json:"path,omitempty"`
+
+	// Category is the task stage the request was classified as.
+	// +optional
+	Category string `json:"category,omitempty"`
+
+	// ParentDecisionID is the decision a fallback replaced.
+	// +optional
+	ParentDecisionID string `json:"parentDecisionID,omitempty"`
 }
 
 // AgentRunStatus defines the observed state of an AgentRun.
@@ -410,9 +426,15 @@ type AgentRunStatus struct {
 
 	// RoutingDecisions records the model routing decisions made during this run.
 	// Populated by the controller from the resolved ModelSelector configuration
-	// and updated by the model-router sidecar at runtime.
+	// and updated by the model-router sidecar at runtime. It holds the most
+	// recent decisions only (see RoutingDecisionsTotal).
 	// +optional
 	RoutingDecisions []RoutingDecision `json:"routingDecisions,omitempty"`
+
+	// RoutingDecisionsTotal counts every decision recorded during this run,
+	// including those that have rolled out of RoutingDecisions.
+	// +optional
+	RoutingDecisionsTotal int `json:"routingDecisionsTotal,omitempty"`
 
 	// ContextUsedTokens is the estimated token count of the conversation context.
 	// Updated by the model-router at runtime and reflects the current size of the

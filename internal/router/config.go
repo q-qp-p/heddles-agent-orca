@@ -47,6 +47,20 @@ type Config struct {
 	// AgentName is the Agent this run or deployment runs (hindsight bank IDs).
 	AgentName string
 
+	// SelectorName is the ModelSelector that supplied Providers, recorded on
+	// every routing decision.
+	SelectorName string
+	// SessionID groups the runs of one conversation. It falls back to RunName
+	// when the run has no session label.
+	SessionID string
+	// ParentRunName is set for a run spawned by another run (a subagent).
+	ParentRunName string
+	// WorkflowStep is the AgentWorkflow step this run executes, if any.
+	WorkflowStep string
+	// RunDeadline is when the run's timeout expires; nil when the run has no
+	// timeout. The timeout-proximity routing rule needs it.
+	RunDeadline *time.Time
+
 	// DisableClarify prevents the auto-trigger clarify safety net from activating.
 	// Set from Agent.Spec.DisableClarify for autonomous agents.
 	DisableClarify bool

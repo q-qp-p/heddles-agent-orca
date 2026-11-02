@@ -17,15 +17,12 @@ limitations under the License.
 package router
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -98,16 +95,30 @@ func (s RoutingState) turnBucket() string {
 // MetaRouter uses a cheap/fast LLM to decide which model to use for ambiguous requests.
 // It is only invoked when the rule-router's confidence falls below the configured threshold.
 type MetaRouter struct {
-	cfg      *Config
+	cfg *Config
+	// forward sends the routing prompt to a provider through the router's own
+	// forwarders, so every provider wire format (Anthropic Messages included)
+	// is spoken correctly. Bound by New once the Router exists.
+	forward  chatForwarder
 	cache    map[string]metaRouterCacheEntry
 	cacheMu  sync.Mutex
 	cacheTTL time.Duration
 }
 
-// NewMetaRouter creates a MetaRouter from the given configuration.
-func NewMetaRouter(cfg *Config) *MetaRouter {
+// metaRouterTimeout bounds one meta-router LLM call; a slow routing model must
+// not stall the request that is waiting on the decision.
+const metaRouterTimeout = 15 * time.Second
+
+// chatForwarder sends one non-streaming chat completion to a provider and
+// returns the OpenAI-shaped response body.
+type chatForwarder func(ctx context.Context, provider *ProviderConfig, req ChatCompletionRequest) ([]byte, error)
+
+// NewMetaRouter creates a MetaRouter from the given configuration. forward
+// carries its LLM calls; it may be nil until bound.
+func NewMetaRouter(cfg *Config, forward chatForwarder) *MetaRouter {
 	return &MetaRouter{
 		cfg:      cfg,
+		forward:  forward,
 		cache:    make(map[string]metaRouterCacheEntry),
 		cacheTTL: 60 * time.Second,
 	}
@@ -248,38 +259,17 @@ func (m *MetaRouter) buildRoutingPrompt(messages []Message) string {
 // callLLM sends a single-turn request to the meta-router provider and returns the response text
 // along with token usage for cost tracking.
 func (m *MetaRouter) callLLM(ctx context.Context, provider *ProviderConfig, prompt string) (string, TokenUsage, error) {
-	apiKey, err := readAPIKey(provider.APIKeyFile)
-	if err != nil {
-		return "", TokenUsage{}, fmt.Errorf("reading API key for meta-router provider: %w", err)
+	if m.forward == nil {
+		return "", TokenUsage{}, fmt.Errorf("meta-router has no provider forwarder")
 	}
-
-	// Use LiteLLM proxy format — the provider's LiteLLM model string is passed directly.
-	reqBody, _ := json.Marshal(map[string]any{
-		"model": provider.LiteLLMModel,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"max_tokens":  50,
-		"temperature": 0,
+	temperature := 0.0
+	body, err := m.forward(ctx, provider, ChatCompletionRequest{
+		Messages:    []Message{{Role: "user", Content: prompt}},
+		MaxTokens:   50,
+		Temperature: &temperature,
 	})
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		liteLLMEndpoint(provider), bytes.NewReader(reqBody))
-	if err != nil {
-		return "", TokenUsage{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", TokenUsage{}, fmt.Errorf("meta-router LLM call: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", TokenUsage{}, fmt.Errorf("meta-router LLM returned %d: %s", resp.StatusCode, body)
 	}
 
 	var result struct {

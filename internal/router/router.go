@@ -74,6 +74,7 @@ type Router struct {
 	auth              *Authenticator
 	ruleRouter        *RuleRouter
 	metaRouter        *MetaRouter
+	selector          Selector // picks the provider for each call; see selectorOrDefault
 	store             state.Store
 	priorMessages     []Message       // conversation history before the current turn (checkpoint + folded turns)
 	messages          []Message       // the current turn: client input, assistant replies, tool results
@@ -164,7 +165,7 @@ func New(cfg *Config, store state.Store, initialMessages []json.RawMessage, exec
 
 	var metaRouter *MetaRouter
 	if cfg.Strategy == "llm-meta" || cfg.Strategy == "hybrid" {
-		metaRouter = NewMetaRouter(cfg)
+		metaRouter = NewMetaRouter(cfg, nil) // forwarder is bound once the Router exists
 	}
 
 	// Decode initial messages from checkpoint.
@@ -239,6 +240,7 @@ func New(cfg *Config, store state.Store, initialMessages []json.RawMessage, exec
 		auth:              auth,
 		ruleRouter:        ruleRouter,
 		metaRouter:        metaRouter,
+		selector:          newLegacySelector(cfg, ruleRouter, metaRouter),
 		store:             store,
 		priorMessages:     msgs,
 		checkpointTTL:     checkpointTTL,
@@ -252,6 +254,12 @@ func New(cfg *Config, store state.Store, initialMessages []json.RawMessage, exec
 		exec:              exec,
 		// Initialize incremental token counter for the loaded checkpoint.
 		liveBufferTokens: 0,
+	}
+
+	if metaRouter != nil {
+		metaRouter.forward = func(ctx context.Context, provider *ProviderConfig, req ChatCompletionRequest) ([]byte, error) {
+			return r.forwardToProviderWithin(ctx, provider, req, metaRouterTimeout)
+		}
 	}
 
 	// Restore accumulated spend from the state store so cost tracking
@@ -945,7 +953,7 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 	}
 
 	// Select the best provider.
-	provider, routeResult := r.selectProvider(req.Context(), chatReq.Messages)
+	provider, sel := r.selectProvider(req.Context(), chatReq.Messages)
 	if provider == nil {
 		http.Error(w, "no available provider", http.StatusServiceUnavailable)
 		return
@@ -961,16 +969,18 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 	}
 
 	// Record the actual per-request routing decision so the UI shows the model that ran.
-	go r.postRoutingDecision(req.Context(), provider, routeResult)
+	go r.postRoutingDecision(provider, sel, "")
 	// Trace-stream copy for ACP/editor clients that never poll the AgentRun CRD.
 	// Emitted synchronously BEFORE the LLM call so the editor shows which model
 	// was selected while it works, not after the turn completes.
-	r.emitRoutingTraceEvent(provider, routeResult)
+	r.emitRoutingTraceEvent(provider, sel)
 
 	slog.Info("routing request",
 		"provider", provider.Name,
-		"reason", routeResult.Reason,
-		"confidence", routeResult.Confidence,
+		"reason", sel.Reason,
+		"path", sel.Path,
+		"decision", sel.DecisionID,
+		"confidence", sel.Confidence,
 		"stream", chatReq.Stream,
 		"run", r.cfg.RunName,
 	)
@@ -1033,6 +1043,13 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 			return
 		}
 		r.emitTraceEventBoth(fmt.Sprintf(`{"type":"providerFallback","from":%q,"to":%q,"reason":%q}`, primaryName, provider.Name, "streaming fallback succeeded"))
+		// The fallback is its own decision: the UI must show the model that
+		// actually answered, and it points back at the one that failed.
+		fallbackSel := sel
+		fallbackSel.DecisionID = newDecisionID()
+		fallbackSel.Path = pathFallback
+		fallbackSel.Reason = "fallback from " + primaryName
+		go r.postRoutingDecision(provider, fallbackSel, sel.DecisionID)
 	}
 	// Tell trace-stream clients the turn was compacted before sending —
 	// without it a silently-shortened conversation looks like memory loss.
@@ -1099,7 +1116,12 @@ func (r *Router) HandleGemini(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	provider, _ := r.selectProvider(req.Context(), openAIReq.Messages)
+	// The Gemini request carries only this turn; selection sees the stored
+	// conversation ahead of it, like the chat-completions path does.
+	r.mu.Lock()
+	conversation := slices.Concat(r.priorMessages, r.messages, openAIReq.Messages)
+	r.mu.Unlock()
+	provider, _ := r.selectProvider(req.Context(), conversation)
 	if provider == nil {
 		http.Error(w, "no available provider", http.StatusServiceUnavailable)
 		return
@@ -1137,59 +1159,100 @@ func (r *Router) HandleGemini(w http.ResponseWriter, req *http.Request) {
 	_, _ = w.Write(geminiResp)
 }
 
-// selectProvider runs the hybrid routing logic to pick the best provider.
-func (r *Router) selectProvider(ctx context.Context, messages []Message) (*ProviderConfig, RouteResult) {
-	r.mu.Lock()
-	allMessages := make([]Message, 0, len(r.priorMessages)+len(r.messages)+len(messages))
-	allMessages = append(allMessages, r.priorMessages...)
-	allMessages = append(allMessages, r.messages...)
-	allMessages = append(allMessages, messages...)
-	r.mu.Unlock()
-
-	estimated := 0
-	result := r.ruleRouter.Route(allMessages, estimated, 0)
-
-	// In hybrid mode, invoke meta-router for low-confidence decisions.
-	if r.metaRouter != nil && result.Confidence < r.cfg.MetaRouterThreshold {
-		metaName, metaUsage, err := r.metaRouter.Route(ctx, allMessages)
-		// Track meta-router LLM cost regardless of routing success.
-		if metaUsage.PromptTokens > 0 || metaUsage.CompletionTokens > 0 {
-			// Use the meta-router's own provider for cost calculation.
-			for i := range r.cfg.Providers {
-				if r.cfg.Providers[i].Name == r.cfg.MetaRouterProviderName {
-					r.updateSpend(metaUsage, &r.cfg.Providers[i])
-					break
-				}
+// selectProvider asks the Selector for the provider that serves this call.
+// messages is the full outbound conversation, exactly as it will be sent.
+// The returned provider is nil only when no provider is configured.
+func (r *Router) selectProvider(ctx context.Context, messages []Message) (*ProviderConfig, Selection) {
+	sessionID := r.cfg.SessionID
+	if sessionID == "" {
+		sessionID = r.cfg.RunName
+	}
+	sel, err := r.selectorOrDefault().Select(ctx, SelectionInput{
+		Messages:            messages,
+		EstimatedTokens:     estimateTokens(messages),
+		State:               r.routingState(),
+		RemainingTimeoutSec: r.remainingTimeoutSec(),
+		Session: SessionInfo{
+			ID:         sessionID,
+			AgentID:    r.cfg.AgentName,
+			IsSubagent: r.cfg.ParentRunName != "",
+		},
+	})
+	if err != nil {
+		slog.Warn("selector failed, using the first provider", "err", err, "run", r.cfg.RunName)
+	}
+	// Selector-side LLM calls (the meta-router) cost money whether or not they
+	// produced a decision.
+	for _, aux := range sel.AuxUsage {
+		for i := range r.cfg.Providers {
+			if r.cfg.Providers[i].Name == aux.Provider {
+				r.updateSpend(aux.Usage, &r.cfg.Providers[i])
+				break
 			}
 		}
-		if err != nil {
-			slog.Warn("meta-router failed, using rule-based result", "err", err)
-		} else {
-			result.ProviderName = metaName
-			result.Reason = "meta-router (confidence was " + fmt.Sprintf("%.2f", result.Confidence) + ")"
-			result.Confidence = 0.85
+	}
+	if sel.Provider == nil && len(r.cfg.Providers) > 0 {
+		sel.Provider = &r.cfg.Providers[0]
+		if sel.Reason == "" {
+			sel.Reason = "selector failed; first provider"
 		}
 	}
+	if sel.DecisionID == "" {
+		sel.DecisionID = newDecisionID()
+	}
+	return sel.Provider, sel
+}
 
-	for i := range r.cfg.Providers {
-		if r.cfg.Providers[i].Name == result.ProviderName {
-			return &r.cfg.Providers[i], result
-		}
+// selectorOrDefault returns the configured Selector, building the legacy one
+// for a Router that was assembled without it.
+func (r *Router) selectorOrDefault() Selector {
+	if r.selector == nil {
+		r.selector = newLegacySelector(r.cfg, r.ruleRouter, r.metaRouter)
 	}
-	// Fallback to first provider.
-	return &r.cfg.Providers[0], result
+	return r.selector
+}
+
+// routingState snapshots the live run state that selectors and the
+// meta-router cache bucket on.
+func (r *Router) routingState() RoutingState {
+	st := RoutingState{
+		BudgetUSD: r.cfg.BudgetPerRunUSD,
+		SpentUSD:  r.ruleRouter.spentUSD,
+		TurnCount: r.ruleRouter.TurnCount(),
+	}
+	if r.cfg.RunDeadline != nil {
+		st.TimeoutTotalSec = r.cfg.RunDeadline.Sub(r.ruleRouter.startedAt).Seconds()
+		st.TimeoutElapsedSec = time.Since(r.ruleRouter.startedAt).Seconds()
+	}
+	return st
+}
+
+// remainingTimeoutSec is the time left before the run deadline; 0 means the
+// run has no deadline (or it has passed, in which case the rule has no effect
+// either way).
+func (r *Router) remainingTimeoutSec() float64 {
+	if r.cfg.RunDeadline == nil {
+		return 0
+	}
+	return max(0, time.Until(*r.cfg.RunDeadline).Seconds())
 }
 
 // forwardToProvider sends the chat completion request to the selected provider.
 // The provider's LiteLLM model string is used — the request is formatted for OpenAI API
 // and forwarded to the appropriate endpoint.
-func (r *Router) forwardToProvider(ctx context.Context, provider *ProviderConfig, chatReq ChatCompletionRequest) ([]byte, error) { //nolint:unparam
-
+func (r *Router) forwardToProvider(_ context.Context, provider *ProviderConfig, chatReq ChatCompletionRequest) ([]byte, error) {
 	// Use a detached context with a generous timeout so the outgoing LLM call
 	// is not canceled when the agent's HTTP connection drops. The timeout is
 	// config-driven (default 1h; see LLM_REQUEST_TIMEOUT), decoupled from the
 	// incoming agent request context.
-	llmCtx, cancel := context.WithTimeout(context.Background(), r.cfg.LLMRequestTimeout)
+	return r.forwardToProviderWithin(context.Background(), provider, chatReq, r.cfg.LLMRequestTimeout)
+}
+
+// forwardToProviderWithin is forwardToProvider bounded by parent and timeout.
+// Routing-side calls (the meta-router) use it so a slow provider cannot stall
+// the request that is waiting on the decision.
+func (r *Router) forwardToProviderWithin(parent context.Context, provider *ProviderConfig, chatReq ChatCompletionRequest, timeout time.Duration) ([]byte, error) {
+	llmCtx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	// Anthropic requires its own wire format — handle separately before any generic logic.
@@ -1293,6 +1356,9 @@ func (r *Router) forwardToAnthropic(ctx context.Context, provider *ProviderConfi
 	}
 	if len(systemParts) > 0 {
 		reqBody["system"] = strings.Join(systemParts, "\n\n")
+	}
+	if chatReq.Temperature != nil {
+		reqBody["temperature"] = *chatReq.Temperature
 	}
 
 	if len(chatReq.Tools) > 0 {
@@ -1993,22 +2059,26 @@ const (
 // stream so editor/UI clients see which model ran (mirrors the AgentRun status
 // entry recorded via postRoutingDecision). Fire-and-forget: tracing must never
 // fail a request because routing already happened.
-func (r *Router) emitRoutingTraceEvent(provider *ProviderConfig, result RouteResult) {
+func (r *Router) emitRoutingTraceEvent(provider *ProviderConfig, sel Selection) {
 	if r.cfg.RunName == "" {
 		return
 	}
-	ev, err := json.Marshal(map[string]any{
+	ev := map[string]any{
 		"type":       traceEventTypeRouting,
 		"model":      provider.LiteLLMModel,
 		"provider":   provider.Name,
 		"strategy":   r.cfg.Strategy,
-		"reason":     result.Reason,
-		"confidence": result.Confidence,
-	})
+		"reason":     sel.Reason,
+		"confidence": sel.Confidence,
+		"decisionId": sel.DecisionID,
+		"path":       sel.Path,
+		"stage":      sel.Category.Stage,
+	}
+	data, err := json.Marshal(ev)
 	if err != nil {
 		return
 	}
-	r.emitTraceEventBoth(string(ev))
+	r.emitTraceEventBoth(string(data))
 }
 
 // emitHindsightTraceEvent writes a hindsight memory-system trace event
@@ -3099,15 +3169,22 @@ func (r *Router) executeEmitEvent(ctx context.Context, args string) string {
 	return string(result)
 }
 
+// routingDecisionPostTimeout bounds one POST of a routing decision to the
+// operator API. The post is detached from the agent's request, which ends
+// (and cancels its context) before a slow operator answers.
+const routingDecisionPostTimeout = 5 * time.Second
+
+// routingDecisionClient posts routing decisions; unlike http.DefaultClient it
+// cannot hang forever on an unresponsive operator.
+var routingDecisionClient = &http.Client{Timeout: routingDecisionPostTimeout}
+
 // postRoutingDecision records the actual per-request routing decision to the
 // AgentRun status via the operator API so the UI shows which model was used.
 // Failures are logged but never returned — routing already happened.
 // The trace-stream copy is emitted separately (emitRoutingTraceEvent) from the
-// single HandleChatCompletions dispatch point — this function is invoked twice
-// per streaming request (chat handler + forwardToProviderStream), which would
-// duplicate every trace event.
-func (r *Router) postRoutingDecision(ctx context.Context, provider *ProviderConfig, result RouteResult) {
-
+// single HandleChatCompletions dispatch point. parentDecisionID links a
+// fallback decision to the decision it replaced.
+func (r *Router) postRoutingDecision(provider *ProviderConfig, sel Selection, parentDecisionID string) {
 	if r.cfg.RunName == "" || r.cfg.OperatorAPIURL == "" {
 		return
 	}
@@ -3118,12 +3195,18 @@ func (r *Router) postRoutingDecision(ctx context.Context, provider *ProviderConf
 	}
 	saToken := strings.TrimSpace(string(tokenBytes))
 	body, _ := json.Marshal(map[string]string{
-		"model":      provider.LiteLLMModel,
-		"provider":   provider.Name,
-		"strategy":   r.cfg.Strategy,
-		"reason":     result.Reason,
-		"confidence": fmt.Sprintf("%.2f", result.Confidence),
+		"model":            provider.LiteLLMModel,
+		"provider":         provider.Name,
+		"strategy":         r.cfg.Strategy,
+		"reason":           sel.Reason,
+		"confidence":       fmt.Sprintf("%.2f", sel.Confidence),
+		"decisionID":       sel.DecisionID,
+		"path":             sel.Path,
+		"category":         sel.Category.Stage,
+		"parentDecisionID": parentDecisionID,
 	})
+	ctx, cancel := context.WithTimeout(context.Background(), routingDecisionPostTimeout)
+	defer cancel()
 	url := fmt.Sprintf("%s/agentrun/%s/%s/route", r.cfg.OperatorAPIURL, r.cfg.RunNamespace, r.cfg.RunName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -3132,7 +3215,7 @@ func (r *Router) postRoutingDecision(ctx context.Context, provider *ProviderConf
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+saToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := routingDecisionClient.Do(req)
 	if err != nil {
 		slog.Warn("posting route decision", "err", err)
 		return
@@ -4096,6 +4179,7 @@ type ChatCompletionRequest struct {
 	Tools         []map[string]any `json:"tools,omitempty"`
 	ToolChoice    any              `json:"tool_choice,omitempty"`
 	MaxTokens     int              `json:"max_tokens,omitempty"`
+	Temperature   *float64         `json:"temperature,omitempty"`
 	Stream        bool             `json:"stream,omitempty"`
 	StreamOptions *StreamOptions   `json:"stream_options,omitempty"`
 }

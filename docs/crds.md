@@ -327,7 +327,7 @@ graph LR
 | `phase` | Current lifecycle phase |
 | `spendUSD` | Cumulative USD spend for this run |
 | `output` | Agent output (truncated to 10 KB) |
-| `routingDecisions` | History of model selection choices |
+| `routingDecisions` | The most recent 100 model selection choices (provider, strategy, reason, confidence, decision ID, deciding path, task stage). `routingDecisionsTotal` counts every decision, including those that rolled off. |
 | `childRunRefs` | Sub-agent AgentRuns spawned via tools |
 | `checkpointRef` | Storage key for conversation state |
 | `clarifyQuestion` | Question posed to the human when phase is `WaitingForInput` |

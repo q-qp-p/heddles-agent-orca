@@ -1296,6 +1296,7 @@ func (r *AgentRunReconciler) buildRouterConfig( //nolint:gocyclo
 		Hindsight:                  hindsightConfig(agent, r.HindsightURL),
 		Filesystem:                 fsCfg,
 	}
+	applyRunRoutingIdentity(cfg, run, selector.Name, time.Now())
 	if agent.Spec.Runtime.InputMode == "http" {
 		port := agent.Spec.Runtime.InputPort
 		if port == 0 {
