@@ -669,6 +669,9 @@ func main() {
 
 	// Start the external API server (port 8084) for enterprise integrations.
 	externalAPI := apiserver.NewExternalAPIServer(k8sClient, mgr.GetClient(), externalAuth, stateConfig.Backend != "", stateStore) //nolint:lll
+	if pgStore != nil {
+		externalAPI.WithFeedbackStore(pgStore)
+	}
 
 	go func() {
 		srv := newHTTPServer(":8084", externalAPI.Handler())

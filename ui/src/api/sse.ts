@@ -61,6 +61,35 @@ export async function getRunRoutingEvents(runId: string, namespace: string): Pro
   return body.events ?? []
 }
 
+/** A person's rating of a run, or of one of its routing decisions. */
+export interface RoutingFeedback {
+  /** Empty for a rating of the whole run. */
+  decisionId?: string
+  /** 1 for a thumbs up, -1 for a thumbs down. */
+  rating: 1 | -1
+  comment?: string
+}
+
+/** The caller's own ratings of a run. Rejects when the operator has no PostgreSQL
+ *  store (HTTP 503), so the UI can hide the thumbs. */
+export async function getRunFeedback(runId: string, namespace: string): Promise<RoutingFeedback[]> {
+  const res = await apiFetch(`/api/runs/${encodeURIComponent(namespace)}/${encodeURIComponent(runId)}/feedback`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const body = (await res.json()) as { feedback?: Array<{ decisionId?: string; rating: 1 | -1; comment?: string }> }
+  return (body.feedback ?? []).map((f) => ({ decisionId: f.decisionId, rating: f.rating, comment: f.comment }))
+}
+
+/** Rates a run, or one routing decision of it. Rating the same target again
+ *  replaces the earlier rating. */
+export async function submitRunFeedback(runId: string, namespace: string, feedback: RoutingFeedback): Promise<void> {
+  const res = await apiFetch(`/api/runs/${encodeURIComponent(namespace)}/${encodeURIComponent(runId)}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(feedback),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
 /** Shows a routing event in the decision list the router accordion renders. */
 export function routingEventToDecision(e: RoutingEventInfo): RoutingDecisionInfo {
   const reason = e.fallbackFrom

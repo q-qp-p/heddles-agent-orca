@@ -110,6 +110,9 @@ func TestSwitchyardSelector_RoutesByToolHistory(t *testing.T) {
 	if clean.Confidence < 0.5 || clean.Category.SYLabel != "dimensions" || len(clean.Signals) == 0 {
 		t.Errorf("evidence not carried: confidence %v label %q signals %s", clean.Confidence, clean.Category.SYLabel, clean.Signals)
 	}
+	if !strings.HasPrefix(clean.Reason, "Chose "+syWeak) {
+		t.Errorf("clean history reason = %q, want it to name the efficient model", clean.Reason)
+	}
 	if clean.Category.Stage == "" || clean.DecisionID == "" {
 		t.Errorf("the stage category and decision ID must be set on every decision: %+v", clean)
 	}
@@ -117,6 +120,9 @@ func TestSwitchyardSelector_RoutesByToolHistory(t *testing.T) {
 	failing := selectSY(t, s, toolRounds(5, "Bash", failingBashOutput), "failing")
 	if failing.Provider.Name != syStrong || failing.Category.SYLabel != "override" {
 		t.Errorf("failing history: provider %s label %q, want the capable model by hard override", failing.Provider.Name, failing.Category.SYLabel)
+	}
+	if !strings.HasPrefix(failing.Reason, "Escalated to "+syStrong) || !strings.Contains(failing.Reason, "stage_router override") {
+		t.Errorf("failing history reason = %q, want the escalation and its label", failing.Reason)
 	}
 }
 
@@ -144,7 +150,7 @@ func TestSwitchyardSelector_FailsOpenToTheRuleRouter(t *testing.T) {
 	if err != nil || sel.Provider == nil {
 		t.Fatalf("Select = %+v, %v: routing must never fail because Switchyard cannot decide", sel, err)
 	}
-	if sel.Path != pathSwitchyardFailOpen || !strings.Contains(sel.Reason, "switchyard failed") || !strings.Contains(sel.Reason, "advisor") {
+	if sel.Path != pathSwitchyardFailOpen || !strings.Contains(sel.Reason, "Switchyard could not decide") || !strings.Contains(sel.Reason, "advisor") {
 		t.Errorf("path %q reason %q: the failure must be visible", sel.Path, sel.Reason)
 	}
 	if !strings.Contains(string(sel.Signals), "error") || sel.Algorithm != "advisor" {

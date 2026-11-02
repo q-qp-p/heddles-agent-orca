@@ -59,7 +59,7 @@ func getRun(t *testing.T, s *Server, name string) agentorcav1alpha1.AgentRun {
 
 func decisionBody(id string) string {
 	return fmt.Sprintf(`{"provider":"p","model":"m","strategy":"hybrid","reason":"r","confidence":"0.50",`+
-		`"decisionID":%q,"path":"rule:weighted","category":"chat","parentDecisionID":"parent-1"}`, id)
+		`"decisionID":%q,"path":"rule:weighted","category":"chat","algorithm":"stage_router","label":"override","parentDecisionID":"parent-1"}`, id)
 }
 
 func TestRecordRoutingDecision_StoresDecisionFields(t *testing.T) {
@@ -75,6 +75,9 @@ func TestRecordRoutingDecision_StoresDecisionFields(t *testing.T) {
 	got := run.Status.RoutingDecisions[0]
 	if got.DecisionID != "d-1" || got.Path != "rule:weighted" || got.Category != "chat" || got.ParentDecisionID != "parent-1" {
 		t.Errorf("decision fields not stored: %+v", got)
+	}
+	if got.Algorithm != "stage_router" || got.Label != "override" {
+		t.Errorf("algorithm %q label %q: the structured reason fields must be stored", got.Algorithm, got.Label)
 	}
 	if got.Timestamp == nil {
 		t.Errorf("timestamp not set")

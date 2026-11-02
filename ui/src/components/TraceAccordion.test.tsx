@@ -358,3 +358,44 @@ describe('TraceAccordion', () => {
     expect(screen.queryByText(/budget/)).not.toBeInTheDocument()
   })
 })
+
+describe('TraceAccordion routed row', () => {
+  const decision = {
+    type: STREAM_EVENT_TYPE.modelSelected,
+    model: 'claude-sonnet-5-5',
+    reason: 'Escalated to sonnet: tool calls have been failing repeatedly (stage tool-exec; stage_router override)',
+    confidence: 0.9,
+    provider: 'anthropic-claude-sonnet-5-5',
+    algorithm: 'stage_router',
+    label: 'override',
+    stage: 'tool-exec',
+    path: 'switchyard',
+    decisionId: 'd-1',
+  } as const
+
+  it('shows the decision reason as a sentence', async () => {
+    render(<TraceAccordion entries={[entry(0, decision)]} />)
+    await openAccordion()
+    expect(screen.getByText(/Escalated to sonnet: tool calls have been failing repeatedly/)).toBeInTheDocument()
+  })
+
+  it('puts the label, stage and algorithm behind the disclosure', async () => {
+    render(<TraceAccordion entries={[entry(0, decision)]} />)
+    await openAccordion()
+    const details = screen.getByTestId('routing-details')
+    expect(details).not.toHaveAttribute('open')
+    await userEvent.click(screen.getByText('why this model'))
+    expect(details).toHaveAttribute('open')
+    for (const [k, v] of [['Algorithm', 'stage_router'], ['Label', 'override'], ['Stage', 'tool-exec'], ['Path', 'switchyard']]) {
+      expect(screen.getByText(k)).toBeInTheDocument()
+      expect(screen.getByText(v)).toBeInTheDocument()
+    }
+  })
+
+  it('shows the trace-stream routing event the same way', async () => {
+    render(<TraceAccordion entries={[entry(0, { type: 'routing', model: 'glm', reason: 'Chose glm: picked by random', label: 'x' })]} />)
+    await openAccordion()
+    expect(screen.getByText(/Chose glm: picked by random/)).toBeInTheDocument()
+    expect(screen.getByTestId('routing-details')).toBeInTheDocument()
+  })
+})

@@ -17,7 +17,21 @@ export type TraceEvent =
   | { type: typeof STREAM_EVENT_TYPE.token; content: string }
   | { type: typeof STREAM_EVENT_TYPE.toolCall; name: string; arguments: string; backendType?: string; backendRef?: string }
   | { type: typeof STREAM_EVENT_TYPE.toolResult; name: string; result: string; appUrl?: string; toolArgs?: string; toolResult?: string; backendType?: string; backendRef?: string; durationMs?: number }
-  | { type: typeof STREAM_EVENT_TYPE.modelSelected; model: string; reason: string; confidence: number }
+  | {
+      type: typeof STREAM_EVENT_TYPE.modelSelected
+      model: string
+      // One plain sentence saying what was chosen and why. The fields below back it.
+      reason: string
+      confidence: number
+      provider?: string
+      strategy?: string
+      decisionId?: string
+      path?: string
+      stage?: string
+      algorithm?: string
+      label?: string
+      candidates?: string[]
+    }
   | { type: typeof STREAM_EVENT_TYPE.finalOutput; output: string }
   | { type: typeof STREAM_EVENT_TYPE.error; message: string }
   | { type: typeof STREAM_EVENT_TYPE.clarify; question: string }
@@ -29,7 +43,21 @@ export type TraceEvent =
   | { type: 'mcpDiscovery'; server: string; tools: number }
   | { type: 'guardrail'; action: string; reason: string }
   | { type: 'providerFallback'; from: string; to: string; reason: string; exhausted?: boolean }
-  | { type: 'routing'; model: string; provider?: string; strategy?: string; reason?: string; confidence?: number }
+  | {
+      type: 'routing'
+      model: string
+      provider?: string
+      strategy?: string
+      // One plain sentence saying what was chosen and why. The fields below back it.
+      reason?: string
+      confidence?: number
+      decisionId?: string
+      path?: string
+      stage?: string
+      algorithm?: string
+      label?: string
+      candidates?: string[]
+    }
   | { type: 'hindsight'; op: 'bank' | 'recall' | 'retain' | string; bankID?: string; failed?: boolean; reason?: string }
   // A network decision by the sandbox supervisor (G4): a connection (net) or a request on an
   // allowed connection (http), allowed or denied by the sandbox policy.

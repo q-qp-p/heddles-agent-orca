@@ -117,3 +117,35 @@ Set `MODEL_ROUTER_DISABLE_SWITCHYARD=true` on the model-router container to rout
 
 See also [development notes](development.md#how-the-sidecar-uses-switchyard) and the
 [observability reference](observability.md#routing-telemetry).
+
+## Why a model was chosen
+
+Every routing decision carries one plain sentence that says what was chosen and why, for example:
+
+> Escalated to sonnet-5-5: tool calls have been failing repeatedly (stage tool-exec; stage_router override)
+
+The sentence is in the router's `routing request` log line (next to `algorithm`, `label`, `stage` and
+`path`), in the trace event, in `AgentRun.status.routingDecisions[].reason`, and on the "routed" row of
+the run view. That row has a "why this model" disclosure with the algorithm, label, stage, path, the
+providers that were candidates and the decision ID.
+
+| `stage_router` label | Reads as |
+|---|---|
+| `fall_open` | Chose the efficient model: nothing so far suggests the call needs more |
+| `override` | Escalated to the capable model: tool calls have been failing repeatedly |
+| `capable_hold` | Stayed on the capable model: the run was escalated earlier and has not recovered |
+
+Rule-based and meta-router decisions, Switchyard fail-open and fallback have sentences of their own;
+a fallback names the provider that failed.
+
+## Rating routing
+
+A person can rate how the models were chosen, on a whole run or on one routing decision:
+
+- In the run view, the thumbs next to a "routed" row rate that decision, and the thumbs under the
+  output rate the run. A thumbs down can carry a short comment.
+- Through the task API: `POST /v1/tasks/{id}/feedback` with `{"rating": 1}` or `{"rating": -1}`, an
+  optional `comment` (up to 2 KiB), an optional `decisionId` and an optional `turn`.
+
+Rating the same target again replaces the earlier rating. Ratings are stored in PostgreSQL
+(`routing_feedback`); without it, rating is refused with a 503 instead of being dropped.

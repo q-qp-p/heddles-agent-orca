@@ -36,7 +36,9 @@ func TestEmitRoutingTraceEvent(t *testing.T) {
 		Path:       pathWeighted,
 		Reason:     reasonWeightedRandom,
 		Confidence: 0.5,
-		Category:   Category{Stage: stageChat},
+		Category:   Category{Stage: stageChat, SYLabel: "fall_open"},
+		Algorithm:  algorithmStageRouter,
+		Candidates: []string{"openrouter-free", "other"},
 	})
 
 	var routing map[string]any
@@ -69,6 +71,9 @@ func TestEmitRoutingTraceEvent(t *testing.T) {
 	}
 	if conf, ok := routing["confidence"].(float64); !ok || conf != 0.5 {
 		t.Errorf("confidence = %v, want 0.5", routing["confidence"])
+	}
+	if routing["algorithm"] != algorithmStageRouter || routing["label"] != "fall_open" {
+		t.Errorf("algorithm %v label %v: the structured fields must travel with the reason", routing["algorithm"], routing["label"])
 	}
 	if routing["decisionId"] != "d-1" {
 		t.Errorf("decisionId = %v, want d-1", routing["decisionId"])

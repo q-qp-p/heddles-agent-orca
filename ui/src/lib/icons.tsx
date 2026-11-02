@@ -28,6 +28,8 @@ import {
   Database,
   DollarSign,
   Hash,
+  ThumbsDown,
+  ThumbsUp,
   Headphones,
   Home,
   History,
@@ -151,6 +153,8 @@ export const ICON = {
   settings: Settings,
   thought: Activity,
   routed: ArrowRight,
+  thumbsUp: ThumbsUp,
+  thumbsDown: ThumbsDown,
   event: Bell,
   parseError: Octagon,
 

@@ -193,7 +193,7 @@ export function RunHistoryDetailView({ runId, namespace = 'default', onBack, onN
       {(tab === 'output' || tab === 'details') && hasOutput && (
         <div style={dv.panel} role="region" aria-label="Output">
           <div style={dv.sectionLabel}>Final output</div>
-          <OutputCard output={detail.output} markdown={markdown} streaming={false} />
+          <OutputCard output={detail.output} markdown={markdown} streaming={false} feedbackRun={{ namespace, runName: runId }} />
         </div>
       )}
 
@@ -216,7 +216,7 @@ export function RunHistoryDetailView({ runId, namespace = 'default', onBack, onN
       {tab === 'trace' && (
         <div style={dv.panel} role="region" aria-label="Execution Trace">
           {hasFullTrace ? (
-            <TraceAccordion entries={detail.traceEntries!} streaming={false} markdown={markdown} />
+            <TraceAccordion entries={detail.traceEntries!} streaming={false} markdown={markdown} feedbackRun={{ namespace, runName: runId }} />
           ) : (
             <ExecutionTrace detail={detail} />
           )}

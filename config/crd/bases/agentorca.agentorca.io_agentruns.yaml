@@ -513,6 +513,10 @@ spec:
                   description: RoutingDecision records a single model routing decision
                     made during an AgentRun.
                   properties:
+                    algorithm:
+                      description: Algorithm names the Switchyard algorithm that decided,
+                        when one did.
+                      type: string
                     category:
                       description: Category is the task stage the request was classified
                         as.
@@ -524,6 +528,10 @@ spec:
                     decisionID:
                       description: DecisionID identifies this decision across traces,
                         status and telemetry.
+                      type: string
+                    label:
+                      description: Label is the label the algorithm gave the call,
+                        such as override.
                       type: string
                     model:
                       description: Model is the selected model identifier (e.g. "anthropic/claude-sonnet-4-6").

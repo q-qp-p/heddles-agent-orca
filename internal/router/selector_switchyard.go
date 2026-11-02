@@ -270,27 +270,24 @@ func (s *switchyardSelector) Select(ctx context.Context, in SelectionInput) (Sel
 		return s.failOpen(ctx, in, collector, start, fmt.Errorf("selected %q, which is not a provider", res.Selected[0]))
 	}
 
-	confidence, label, source := parseSignals(res.Metadata)
+	confidence, label, _ := parseSignals(res.Metadata)
 	category := categorize(s.cfg, in.Messages)
 	category.SYLabel = label
-	reason := "switchyard " + s.algorithm
-	if source != "" {
-		reason += " (" + source + ")"
-	}
-	return Selection{
+	sel := Selection{
 		DecisionID: newDecisionID(),
 		Provider:   provider,
 		Candidates: s.candidates(res.Selected),
 		Strategy:   s.cfg.Strategy,
 		Algorithm:  s.algorithm,
 		Path:       pathSwitchyard,
-		Reason:     reason + ": " + provider.Name,
 		Confidence: confidence,
 		Category:   category,
 		Signals:    res.Metadata,
 		AuxUsage:   collector.calls,
 		Latency:    time.Since(start),
-	}, nil
+	}
+	sel.Reason = explainDecision(sel, provider.Name, "")
+	return sel, nil
 }
 
 // failOpen routes with the legacy selector and records why Switchyard did not.
@@ -304,7 +301,7 @@ func (s *switchyardSelector) failOpen(ctx context.Context, in SelectionInput, au
 	sel, err := s.legacy.Select(ctx, in)
 	sel.Algorithm = s.algorithm
 	sel.Path = pathSwitchyardFailOpen
-	sel.Reason = "switchyard failed (" + msg + "); " + sel.Reason
+	sel.Reason = "Switchyard could not decide (" + msg + "); the rule router took over. " + sel.Reason
 	sel.Signals, _ = json.Marshal(map[string]string{"error": msg})
 	sel.AuxUsage = append(slices.Clone(aux.calls), sel.AuxUsage...)
 	sel.Latency = time.Since(start)

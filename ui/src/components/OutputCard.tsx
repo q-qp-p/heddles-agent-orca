@@ -4,15 +4,19 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { DESIGN, ds } from '../lib/designSystem'
 import { Icon, ICON } from '../lib/icons'
+import { FeedbackThumbs, useRunFeedback, type FeedbackTarget } from './FeedbackThumbs'
 
 interface Props {
   output: string
   streaming?: boolean
   /** If true, render output as markdown. */
   markdown?: boolean
+  /** The run that produced the output; with it, the whole run can be rated. */
+  feedbackRun?: FeedbackTarget
 }
 
-export function OutputCard({ output, streaming, markdown }: Props) {
+export function OutputCard({ output, streaming, markdown, feedbackRun }: Props) {
+  const feedback = useRunFeedback(streaming ? undefined : feedbackRun)
   const [copied, setCopied] = useState(false)
   const [open, setOpen] = useState(true)
 
@@ -60,6 +64,12 @@ export function OutputCard({ output, streaming, markdown }: Props) {
               {streaming && <span style={s.cursor}>▌</span>}
             </span>
           )}
+        </div>
+      )}
+      {feedback && (
+        <div style={{ padding: '6px 16px', borderTop: '1px solid var(--ds-border)', fontSize: 12, color: 'var(--ds-text-secondary)' }}>
+          Was this run's model choice right?
+          <FeedbackThumbs feedback={feedback} label="this run" />
         </div>
       )}
     </div>

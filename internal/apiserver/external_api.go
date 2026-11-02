@@ -47,6 +47,8 @@ type ExternalAPIServer struct {
 	auth      *ExternalAuth
 	store     state.Store
 	hasStore  bool
+	// feedback stores ratings of routing; nil refuses them.
+	feedback feedbackStore
 
 	// rateLimiter enforces per-tenant submission rate limits. nil disables it.
 	rateLimiter *RateLimiter
@@ -292,6 +294,8 @@ func (s *ExternalAPIServer) handleTaskByID(w http.ResponseWriter, r *http.Reques
 		s.streamTask(w, r, taskID)
 	case r.Method == http.MethodPost && action == "answer":
 		s.answerTask(w, r, taskID)
+	case r.Method == http.MethodPost && action == "feedback":
+		s.feedbackTask(w, r, taskID)
 	case r.Method == http.MethodDelete && action == "":
 		s.cancelTask(w, r, taskID)
 	default:

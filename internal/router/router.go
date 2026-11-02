@@ -990,6 +990,9 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 		"provider", provider.Name,
 		"reason", sel.Reason,
 		"path", sel.Path,
+		"algorithm", sel.Algorithm,
+		"label", sel.Category.SYLabel,
+		"stage", sel.Category.Stage,
 		"decision", sel.DecisionID,
 		"confidence", sel.Confidence,
 		"stream", chatReq.Stream,
@@ -1067,7 +1070,7 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 		fallbackSel := sel
 		fallbackSel.DecisionID = newDecisionID()
 		fallbackSel.Path = pathFallback
-		fallbackSel.Reason = "fallback from " + primaryName
+		fallbackSel.Reason = explainDecision(fallbackSel, provider.Name, primaryName)
 		fallbackSel.AuxUsage = nil // the selector's own cost belongs to the first attempt
 		go r.postRoutingDecision(provider, fallbackSel, sel.DecisionID)
 		ct = r.beginCall(fallbackSel, provider, primaryName)
@@ -2114,6 +2117,9 @@ func (r *Router) emitRoutingTraceEvent(provider *ProviderConfig, sel Selection) 
 		"decisionId": sel.DecisionID,
 		"path":       sel.Path,
 		"stage":      sel.Category.Stage,
+		"algorithm":  sel.Algorithm,
+		"label":      sel.Category.SYLabel,
+		"candidates": sel.Candidates,
 	}
 	data, err := json.Marshal(ev)
 	if err != nil {
@@ -3247,6 +3253,8 @@ func (r *Router) postRoutingDecision(provider *ProviderConfig, sel Selection, pa
 		"decisionID":       sel.DecisionID,
 		"path":             sel.Path,
 		"category":         sel.Category.Stage,
+		"algorithm":        sel.Algorithm,
+		"label":            sel.Category.SYLabel,
 		"parentDecisionID": parentDecisionID,
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), routingDecisionPostTimeout)

@@ -439,6 +439,8 @@ func (s *Server) recordRoutingDecision(w http.ResponseWriter, r *http.Request, n
 		DecisionID       string `json:"decisionID"`
 		Path             string `json:"path"`
 		Category         string `json:"category"`
+		Algorithm        string `json:"algorithm"`
+		Label            string `json:"label"`
 		ParentDecisionID string `json:"parentDecisionID"`
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
@@ -477,6 +479,8 @@ func (s *Server) recordRoutingDecision(w http.ResponseWriter, r *http.Request, n
 			DecisionID:       req.DecisionID,
 			Path:             req.Path,
 			Category:         req.Category,
+			Algorithm:        req.Algorithm,
+			Label:            req.Label,
 			ParentDecisionID: req.ParentDecisionID,
 		})
 		if extra := len(run.Status.RoutingDecisions) - maxRoutingDecisions; extra > 0 {

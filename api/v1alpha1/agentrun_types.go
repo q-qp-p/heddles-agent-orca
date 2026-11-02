@@ -303,6 +303,14 @@ type RoutingDecision struct {
 	// +optional
 	Category string `json:"category,omitempty"`
 
+	// Algorithm names the Switchyard algorithm that decided, when one did.
+	// +optional
+	Algorithm string `json:"algorithm,omitempty"`
+
+	// Label is the label the algorithm gave the call, such as override.
+	// +optional
+	Label string `json:"label,omitempty"`
+
 	// ParentDecisionID is the decision a fallback replaced.
 	// +optional
 	ParentDecisionID string `json:"parentDecisionID,omitempty"`

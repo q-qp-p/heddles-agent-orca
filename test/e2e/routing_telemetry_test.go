@@ -264,6 +264,13 @@ spec:
 		}
 	})
 
+	It("migrates the feedback table with one rating per user and decision", func() {
+		Expect(psql("select to_regclass('routing_feedback')")).To(Equal("routing_feedback"))
+		Expect(psql("select count(*) from pg_constraint where conrelid='routing_feedback'::regclass and contype='u'")).To(Equal("1"))
+		Expect(psql("select count(*) from pg_constraint where conrelid='routing_feedback'::regclass and contype='c'")).
+			To(Equal("3"), "rating, comment length and source are checked by the table")
+	})
+
 	// Strategy switchyard end to end: the controller validates the algorithm, the
 	// router asks Switchyard which provider serves a call, and an algorithm that
 	// cannot be served still gets answered.

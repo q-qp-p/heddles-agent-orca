@@ -2020,14 +2020,7 @@ func (r *AgentRunReconciler) loadTraceEventsForArchive(ctx context.Context, run 
 		if strings.HasPrefix(rd.Reason, "configured provider") {
 			continue
 		}
-		conf := 0.0
-		_, _ = fmt.Sscanf(rd.Confidence, "%f", &conf)
-		eventJSON, _ := json.Marshal(map[string]any{
-			"type":       "modelSelected",
-			"model":      rd.Model,
-			"reason":     fmt.Sprintf("[%s] %s — %s", rd.Strategy, rd.Provider, rd.Reason),
-			"confidence": conf,
-		})
+		eventJSON, _ := json.Marshal(rd.TraceEvent())
 		ts := ""
 		if rd.Timestamp != nil {
 			ts = rd.Timestamp.UTC().Format(time.RFC3339)

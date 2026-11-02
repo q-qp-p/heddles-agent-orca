@@ -19,7 +19,6 @@ package router
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"slices"
 	"time"
@@ -187,11 +186,10 @@ func (s *legacySelector) Select(ctx context.Context, in SelectionInput) (Selecti
 		if err != nil {
 			slog.Warn("meta-router failed, using rule-based result", "err", err)
 		} else {
-			sel.Path = "meta"
+			sel.Path = pathMeta
 			if len(sel.AuxUsage) == 0 {
-				sel.Path = "meta-cache"
+				sel.Path = pathMetaCache
 			}
-			sel.Reason = "meta-router (confidence was " + fmt.Sprintf("%.2f", result.Confidence) + ")"
 			sel.Confidence = confMeta
 			result.ProviderName = metaName
 		}
@@ -202,6 +200,7 @@ func (s *legacySelector) Select(ctx context.Context, in SelectionInput) (Selecti
 		sel.Latency = time.Since(start)
 		return sel, nil
 	}
+	sel.Reason = explainDecision(sel, sel.Provider.Name, "")
 	sel.Candidates = s.candidates(sel.Provider.Name)
 	sel.Latency = time.Since(start)
 	return sel, nil
@@ -209,6 +208,12 @@ func (s *legacySelector) Select(ctx context.Context, in SelectionInput) (Selecti
 
 // pathFallback marks a decision made after the selected provider failed.
 const pathFallback = "fallback"
+
+// Paths of a decision the LLM meta-router made: fresh, or served from its cache.
+const (
+	pathMeta      = "meta"
+	pathMetaCache = "meta-cache"
+)
 
 // confMeta is the confidence assigned to a meta-router decision.
 const confMeta = 0.85

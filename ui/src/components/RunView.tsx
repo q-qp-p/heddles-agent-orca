@@ -343,7 +343,7 @@ export function RunView({
         </div>
       ) : viewTab === 'trace' ? (
         <div id="trace-panel" role="tabpanel" style={{ flex: 1, overflowY: 'auto' }}>
-          <TraceAccordion entries={entries} streaming={isRunning} markdown={markdown} />
+          <TraceAccordion entries={entries} streaming={isRunning} markdown={markdown} feedbackRun={{ namespace, runName: runId }} />
           {detail && detail.routingDecisions.length > 0 && (
             <RouterAccordion
               decisions={detail.routingDecisions}
@@ -376,6 +376,7 @@ export function RunView({
               output={output || ''}
               streaming={isRunning && !output}
               markdown={markdown}
+              feedbackRun={{ namespace, runName: runId }}
             />
           )}
 

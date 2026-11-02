@@ -24,7 +24,7 @@ tags:
   - name: authentication
     description: OAuth2 client_credentials token exchange
   - name: tasks
-    description: Submit, poll, stream, answer, and cancel agent tasks
+    description: Submit, poll, stream, answer, rate, and cancel agent tasks
 components:
   securitySchemes:
     BearerAuth:
@@ -164,6 +164,27 @@ components:
         answer:
           type: string
           description: The human's response to a clarification question.
+    TaskFeedback:
+      type: object
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          enum: [-1, 1]
+          description: "1 for a thumbs up, -1 for a thumbs down."
+        comment:
+          type: string
+          maxLength: 2048
+          description: Optional free text, at most 2048 bytes.
+        decisionId:
+          type: string
+          description: |-
+            Rates one routing decision of the task (the `decisionId` of a routing
+            event). Leave empty to rate the whole task.
+        turn:
+          type: integer
+          minimum: 0
+          description: The turn the rating is for, when known.
     AnswerResponse:
       type: object
       required: [status]
@@ -346,4 +367,37 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/AnswerResponse' } } }
         '409':
           description: Task is not currently waiting for input.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/tasks/{taskID}/feedback:
+    post:
+      tags: [tasks]
+      summary: Rate how a task's models were chosen
+      description: |-
+        Records a thumbs up or down on a task, or on one of its routing decisions.
+        Rating the same target again replaces the earlier rating. Ratings feed the
+        routing recommendations; they do not change the task.
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: taskID
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskFeedback'
+      responses:
+        '204':
+          description: Feedback recorded.
+        '400':
+          description: The rating or comment is invalid.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404':
+          description: No such task for this tenant.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '503':
+          description: Feedback needs the PostgreSQL store, which is not configured.
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }

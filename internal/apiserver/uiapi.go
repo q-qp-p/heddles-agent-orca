@@ -89,6 +89,8 @@ type UIServer struct {
 	costArchive costArchive
 	// routingReader overrides pgStore for routing telemetry reads (tests).
 	routingReader routingEventReader
+	// feedback overrides pgStore for routing feedback (tests).
+	feedback feedbackStore
 	// routerMetricsURLFor builds a model-router metrics URL from a pod IP (tests);
 	// nil means http://<ip>:9091/metrics.
 	routerMetricsURLFor func(podIP string) string
@@ -350,6 +352,8 @@ func (s *UIServer) handleRunOrStream(w http.ResponseWriter, r *http.Request) {
 			s.handleStream(w, r, ns, runName)
 		case "routing-events":
 			s.handleRunRoutingEvents(w, r, ns, runName)
+		case "feedback":
+			s.handleRunFeedback(w, r, ns, runName)
 		case "stop":
 			s.handleStopRun(w, r, ns, runName)
 		case "answer":
@@ -466,14 +470,7 @@ func (s *UIServer) handleStream(w http.ResponseWriter, r *http.Request, ns, runN
 			if strings.HasPrefix(rd.Reason, "configured provider") {
 				continue
 			}
-			conf := 0.0
-			_, _ = fmt.Sscanf(rd.Confidence, "%f", &conf)
-			writeSSE(w, map[string]any{
-				"type":       "modelSelected",
-				"model":      rd.Model,
-				"reason":     fmt.Sprintf("[%s] %s — %s", rd.Strategy, rd.Provider, rd.Reason),
-				"confidence": conf,
-			})
+			writeSSE(w, rd.TraceEvent())
 		}
 	}
 
