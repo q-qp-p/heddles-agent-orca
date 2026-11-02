@@ -305,3 +305,46 @@ func TestAgentValidatorSandboxClass(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentValidatorShell(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = agentorcav1alpha1.AddToScheme(scheme)
+	optedIn := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "agents", Labels: map[string]string{security.LabelEnableSandboxes: "true"}}}
+	plain := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "plain"}}
+	class := &agentorcav1alpha1.SandboxClass{ObjectMeta: metav1.ObjectMeta{Name: "coder"}}
+
+	shellAgent := func(ns, classRef, image string) agentorcav1alpha1.Agent {
+		a := baseAgent(ns, true)
+		a.Spec.Runtime.OCIRef = "ghcr.io/acme/agent:1"
+		a.Spec.Shell = &agentorcav1alpha1.ShellAccessSpec{ClassRef: classRef, Image: image}
+		return a
+	}
+	tests := []struct {
+		name      string
+		agent     agentorcav1alpha1.Agent
+		allowed   []string
+		errSubstr string // empty = allowed
+	}{
+		{name: "opted-in namespace with a usable class", agent: shellAgent("agents", "coder", "ghcr.io/acme/box:1")},
+		{name: "namespace not opted in", agent: shellAgent("plain", "coder", "ghcr.io/acme/box:1"), errSubstr: "not opted in"},
+		{name: "unknown class", agent: shellAgent("agents", "nope", "ghcr.io/acme/box:1"), errSubstr: "spec.shell.classRef: SandboxClass \"nope\" not found"},
+		{name: "image outside the allowed registries", agent: shellAgent("agents", "coder", "evil.example/box:1"),
+			allowed: []string{"ghcr.io/acme/"}, errSubstr: "spec.shell.image rejected"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			v := &AgentValidator{
+				Client:            fake.NewClientBuilder().WithScheme(scheme).WithObjects(optedIn, plain, class).Build(),
+				AllowedRegistries: tc.allowed,
+			}
+			err := v.validate(context.Background(), &tc.agent)
+			switch {
+			case tc.errSubstr == "" && err != nil:
+				t.Errorf("validate() = %v, want allowed", err)
+			case tc.errSubstr != "" && (err == nil || !strings.Contains(err.Error(), tc.errSubstr)):
+				t.Errorf("validate() = %v, want %q", err, tc.errSubstr)
+			}
+		})
+	}
+}

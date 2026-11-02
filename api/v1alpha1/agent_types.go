@@ -101,6 +101,45 @@ type AgentSpec struct {
 	// filesystem access entirely.
 	// +optional
 	Filesystem *FilesystemAccessSpec `json:"filesystem,omitempty"`
+
+	// Shell gives the agent a built-in sandbox_exec tool that runs shell
+	// commands in a sandbox the operator creates for the run on the first call.
+	// The sandbox is the run's own: files and installed tools persist between
+	// calls, and it is deleted when the run ends. Unlike spec.runtime.sandbox,
+	// which confines the agent process itself, the agent stays in its normal pod
+	// and only the commands it asks for run in the sandbox. Requires an OpenShell
+	// gateway and a namespace labelled `agentorca.io/enable-sandboxes: "true"`.
+	// Nil (the default) gives the agent no shell.
+	// +optional
+	Shell *ShellAccessSpec `json:"shell,omitempty"`
+}
+
+// ShellAccessSpec configures the sandbox_exec tool of an Agent.
+type ShellAccessSpec struct {
+	// ClassRef names the cluster-scoped SandboxClass whose egress, filesystem,
+	// resources, placement and enforcement govern the sandbox. The class is the
+	// only policy: the Agent cannot widen it, and a host the class does not allow
+	// is denied (or goes to the egress approval inbox).
+	// +kubebuilder:validation:MinLength=1
+	ClassRef string `json:"classRef"`
+
+	// Image is the sandbox workload image, which decides the toolchains the
+	// agent has. It must come from an allowed registry.
+	// +kubebuilder:validation:MinLength=1
+	Image string `json:"image"`
+
+	// WorkDir is the directory commands run in unless the call names another.
+	// +kubebuilder:default=/sandbox
+	// +optional
+	WorkDir string `json:"workDir,omitempty"`
+
+	// MaxTimeoutSeconds caps how long one command may run. A call may ask for
+	// less; the default for a call that does not ask is 120 seconds.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=3600
+	// +kubebuilder:default=600
+	// +optional
+	MaxTimeoutSeconds int32 `json:"maxTimeoutSeconds,omitempty"`
 }
 
 // FilesystemAccessMode selects how the agent may touch the user's workspace

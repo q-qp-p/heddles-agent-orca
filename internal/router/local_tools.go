@@ -56,6 +56,7 @@ var builtinToolAliases = map[string]bool{
 	"memory_store": true, "propose_fix": true, "confirm_fix": true,
 	"list_resources": true,
 	fsToolNameRead:   true, fsToolNameWrite: true, fsToolNameList: true,
+	sandboxExecToolName: true,
 }
 
 // isRouterToolName reports whether the router runs a tool of this name.

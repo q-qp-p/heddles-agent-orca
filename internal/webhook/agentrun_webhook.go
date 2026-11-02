@@ -154,7 +154,32 @@ func (v *AgentValidator) validate(ctx context.Context, agent *agentorcav1alpha1.
 			return err
 		}
 	}
+	if agent.Spec.Shell != nil {
+		if err := v.validateShell(ctx, agent); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// validateShell checks Agent.spec.shell (the sandbox_exec tool). A shell can run
+// arbitrary binaries, so the namespace must opt in to sandboxes; what the
+// commands can reach is then decided by the SandboxClass alone, which must be
+// usable from the namespace, and the image must come from an allowed registry.
+func (v *AgentValidator) validateShell(ctx context.Context, agent *agentorcav1alpha1.Agent) error {
+	sh := agent.Spec.Shell
+	var ns corev1.Namespace
+	if err := v.Client.Get(ctx, client.ObjectKey{Name: agent.Namespace}, &ns); err != nil {
+		return fmt.Errorf("looking up namespace %q for shell validation: %w", agent.Namespace, err)
+	}
+	if ns.Labels[security.LabelEnableSandboxes] != "true" {
+		return fmt.Errorf("spec.shell is set, but namespace %q is not opted in: "+
+			"add label %s=true to the namespace", agent.Namespace, security.LabelEnableSandboxes)
+	}
+	if err := v.checkRegistry(sh.Image); err != nil {
+		return fmt.Errorf("spec.shell.image rejected: %w", err)
+	}
+	return v.validateSandboxClass(ctx, "spec.shell.classRef", sh.ClassRef, &ns)
 }
 
 // validateSandbox enforces the gating + consistency rules for running an Agent
@@ -207,7 +232,7 @@ func (v *AgentValidator) validateSandbox(ctx context.Context, agent *agentorcav1
 	}
 
 	if name := rt.Sandbox.ClassRef; name != "" {
-		if err := v.validateSandboxClass(ctx, name, &ns); err != nil {
+		if err := v.validateSandboxClass(ctx, "spec.runtime.sandbox.classRef", name, &ns); err != nil {
 			return err
 		}
 	}
@@ -422,11 +447,11 @@ func validateSandboxGitHub(gh *agentorcav1alpha1.SandboxGitHub) error {
 
 // validateSandboxClass checks that the SandboxClass exists and is available
 // to the Agent's namespace.
-func (v *AgentValidator) validateSandboxClass(ctx context.Context, name string, ns *corev1.Namespace) error {
+func (v *AgentValidator) validateSandboxClass(ctx context.Context, field, name string, ns *corev1.Namespace) error {
 	var class agentorcav1alpha1.SandboxClass
 	if err := v.Client.Get(ctx, client.ObjectKey{Name: name}, &class); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("spec.runtime.sandbox.classRef: SandboxClass %q not found", name)
+			return fmt.Errorf("%s: SandboxClass %q not found", field, name)
 		}
 		return fmt.Errorf("looking up SandboxClass %q: %w", name, err)
 	}
@@ -438,7 +463,7 @@ func (v *AgentValidator) validateSandboxClass(ctx context.Context, name string, 
 		return fmt.Errorf("SandboxClass %q has an invalid namespaceSelector: %w", name, err)
 	}
 	if !selector.Matches(labels.Set(ns.Labels)) {
-		return fmt.Errorf("spec.runtime.sandbox.classRef: SandboxClass %q is not available to namespace %q", name, ns.Name)
+		return fmt.Errorf("%s: SandboxClass %q is not available to namespace %q", field, name, ns.Name)
 	}
 	return nil
 }

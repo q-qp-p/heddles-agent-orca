@@ -645,6 +645,16 @@ func main() {
 	if fsRelay != nil {
 		internalAPI.SetFilesystemRelay(fsRelay)
 	}
+	// sandbox_exec (Agent.spec.shell) needs the OpenShell gateway; without one the
+	// internal API answers 501 and the tool reports that to the agent.
+	if sandboxes != nil {
+		internalAPI.SetShellSandboxes(&controller.ShellSandboxService{
+			Client:            mgr.GetClient(),
+			Sandboxes:         sandboxes,
+			SandboxPlacement:  sandboxPlacement,
+			AllowedRegistries: allowedRegistries,
+		})
+	}
 	go func() {
 		srv := newHTTPServer(":8082", internalAPI.Handler())
 		setupLog.Info("Starting internal API server", "addr", srv.Addr, "tls", internalAPICert != "")

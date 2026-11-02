@@ -36,8 +36,10 @@ import (
 // Labels set on every sandbox the operator creates, so a sandbox found on the
 // gateway can be traced back to its AgentRun.
 const (
-	LabelRunName           = "agentorca.io/run"
-	LabelRunNamespace      = "agentorca.io/run-namespace"
+	LabelRunName      = "agentorca.io/run"
+	LabelRunNamespace = "agentorca.io/run-namespace"
+	// LabelShell marks the sandbox behind a run's sandbox_exec tool.
+	LabelShell             = "agentorca.io/shell"
 	LabelWorkflowName      = "agentorca.io/workflow"
 	LabelWorkflowNamespace = "agentorca.io/workflow-namespace"
 )
@@ -81,6 +83,13 @@ func WorkflowSandboxName(namespace, workflowName string) string {
 // It differs from both the shared sandbox and every other step's sandbox.
 func WorkflowStepSandboxName(namespace, workflowName, stepName string) string {
 	return SandboxName(namespace, "workflow-"+workflowName+"-step-"+stepName, 0)
+}
+
+// ShellSandboxName returns the gateway name of the sandbox behind a run's
+// sandbox_exec tool (Agent.spec.shell). It is stable for the run, which makes
+// creating it idempotent, and differs from the run's own sandbox name.
+func ShellSandboxName(namespace, runName string) string {
+	return SandboxName(namespace, "shell-"+runName, 0)
 }
 
 // WorkflowJobName returns a detached job ID for an AgentRun. Continuations have

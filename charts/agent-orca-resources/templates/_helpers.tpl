@@ -114,6 +114,12 @@ spec:
   filesystem:
     {{- toYaml .filesystem | nindent 4 }}
   {{- end }}
+  {{- if .shell }}
+  {{/* sandbox_exec tool (spec.shell): needs an OpenShell gateway, a namespace
+      labelled agentorca.io/enable-sandboxes=true and a SandboxClass. */}}
+  shell:
+    {{- toYaml .shell | nindent 4 }}
+  {{- end }}
   {{- if .memory }}
   memory:
     {{- toYaml .memory | nindent 4 }}

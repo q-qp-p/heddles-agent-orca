@@ -64,3 +64,16 @@ func TestFilesystemToolCfg(t *testing.T) {
 		t.Fatalf("empty mode should resolve to readOnly with read+list tools, got (%+v, %d)", cfg, len(defs))
 	}
 }
+
+func TestShellToolCfg(t *testing.T) {
+	if cfg, defs := shellToolCfg(nil); cfg != nil || defs != nil {
+		t.Fatalf("an Agent without spec.shell gets no tool, got (%+v, %d defs)", cfg, len(defs))
+	}
+	cfg, defs := shellToolCfg(&agentorcav1alpha1.ShellAccessSpec{ClassRef: "coder", Image: "x", MaxTimeoutSeconds: 300})
+	if cfg == nil || cfg.MaxTimeoutSeconds != 300 {
+		t.Fatalf("the cap must reach the router, got %+v", cfg)
+	}
+	if len(defs) != 1 || defs[0].Name != "sandbox_exec" {
+		t.Fatalf("expected the sandbox_exec definition, got %+v", defs)
+	}
+}

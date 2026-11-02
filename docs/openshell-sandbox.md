@@ -1,5 +1,7 @@
 # Sandboxed agents (NVIDIA OpenShell)
 
+> To give an agent a shell without running the agent itself in a sandbox, see [Sandbox shell](sandbox-shell.md).
+
 An Agent with `spec.runtime.sandbox` runs its agent process in an
 [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox instead of a plain
 pod. The agent gets a real shell: it can run builds and tests and install the tools

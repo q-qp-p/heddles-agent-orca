@@ -37,6 +37,7 @@ COPY internal/ratelimit/ internal/ratelimit/
 COPY internal/router/ internal/router/
 COPY internal/routingbench/ internal/routingbench/
 COPY internal/security/ internal/security/
+COPY internal/shellsandbox/ internal/shellsandbox/
 COPY internal/state/ internal/state/
 COPY internal/webhook/ internal/webhook/
 COPY third_party/switchyard/bindings/go/ third_party/switchyard/bindings/go/

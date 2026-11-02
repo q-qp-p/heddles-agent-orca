@@ -238,6 +238,11 @@ type Config struct {
 	// tools that relay to the user's workstation via the ACP bridge. nil means
 	// filesystem access is disabled (Agent.spec.filesystem was unset).
 	Filesystem *FilesystemConfig `json:"filesystem,omitempty"`
+
+	// Shell enables the built-in sandbox_exec tool, which runs shell commands
+	// in a sandbox the operator keeps for the run. Populated by the operator
+	// from Agent.spec.shell.
+	Shell *ShellConfig `json:"shell,omitempty"`
 }
 
 // ProviderConfig is a fully-resolved LLM provider ready for dispatch.

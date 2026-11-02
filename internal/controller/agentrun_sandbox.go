@@ -354,6 +354,7 @@ func (r *AgentRunReconciler) deleteRunProviders(ctx context.Context, run *agento
 // as an event rather than returned: a gateway outage must not block a run's
 // finalizer, and the sandbox carries labels naming its run for manual cleanup.
 func (r *AgentRunReconciler) deleteRunSandbox(ctx context.Context, run *agentorcav1alpha1.AgentRun) {
+	r.deleteShellSandbox(ctx, run)
 	if ref := run.Spec.WorkflowSandbox; ref != nil {
 		if !ref.Fresh || run.Status.ContinuationRunRef != "" {
 			return // shared sandboxes and fresh clarification chains stay alive

@@ -51,6 +51,7 @@ import (
 	"github.com/heddles/agent-orca/internal/acpfs"
 	"github.com/heddles/agent-orca/internal/rag"
 	"github.com/heddles/agent-orca/internal/security"
+	"github.com/heddles/agent-orca/internal/shellsandbox"
 )
 
 // Server handles the operator's internal API for agent-to-agent communication.
@@ -60,6 +61,8 @@ type Server struct {
 	// fsRelay carries ACP fs/* requests from agent pods to the workstation-side
 	// bridge. nil disables filesystem access (fs requests fail with 501).
 	fsRelay acpfs.Relay
+	// shell runs sandbox_exec commands in a run's sandbox; nil answers 501.
+	shell shellsandbox.Runner
 	// approvals backs tool-call approvals (tool_approval_api.go). nil when there
 	// is no PostgreSQL store; such requests fail with 503.
 	approvals ToolApprovalStore
@@ -155,6 +158,12 @@ func (s *Server) handleAgentRun(w http.ResponseWriter, r *http.Request) { //noli
 		s.enqueueFSRequest(w, r, namespace, parts[1])
 	case r.Method == http.MethodGet && len(parts) == 4 && parts[2] == "fs":
 		s.takeFSResponse(w, r, namespace, parts[1], parts[3])
+	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == shellRoute:
+		s.startShellJob(w, r, caller, namespace, parts[1])
+	case r.Method == http.MethodGet && len(parts) == 4 && parts[2] == shellRoute:
+		s.pollShellJob(w, r, caller, namespace, parts[1], parts[3])
+	case r.Method == http.MethodPost && len(parts) == 5 && parts[2] == shellRoute && parts[4] == "stop":
+		s.stopShellJob(w, r, caller, namespace, parts[1], parts[3])
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}

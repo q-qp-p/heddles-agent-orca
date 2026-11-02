@@ -40,3 +40,14 @@ func filesystemToolCfg(fs *agentorcav1alpha1.FilesystemAccessSpec) (*router.File
 	cfg := &router.FilesystemConfig{Mode: mode}
 	return cfg, cfg.ToolDefinitions()
 }
+
+// shellToolCfg resolves Agent.spec.shell into the model-router's shell
+// configuration plus the sandbox_exec tool definition to inject into every chat
+// request. Returns (nil, nil) when the Agent has no shell.
+func shellToolCfg(sh *agentorcav1alpha1.ShellAccessSpec) (*router.ShellConfig, []router.ToolDefinition) {
+	if sh == nil {
+		return nil, nil
+	}
+	cfg := &router.ShellConfig{MaxTimeoutSeconds: int(sh.MaxTimeoutSeconds)}
+	return cfg, cfg.ToolDefinitions()
+}

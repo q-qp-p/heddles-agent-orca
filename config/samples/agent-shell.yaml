@@ -1,0 +1,26 @@
+# An Agent with a sandbox shell (docs/sandbox-shell.md). The agent keeps its normal
+# pod; the sandbox_exec tool it gets runs commands in a sandbox the operator creates
+# for each run on the first call and deletes when the run ends.
+#
+# What the commands can reach is decided by the SandboxClass alone: here the coder
+# class from sandboxclass-coder.yaml (package registries and GitHub read access, all
+# other hosts denied). Apply that class first, and label the namespace:
+#   kubectl label namespace agent-orca-system agentorca.io/enable-sandboxes=true
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: Agent
+metadata:
+  name: shell-demo
+  namespace: agent-orca-system
+spec:
+  modelSelectorRef: default
+  systemPrompt: |
+    You are a careful engineer. Use sandbox_exec to try things (build, test, run
+    scripts) before you answer; do not guess at what a command would print.
+  runtime:
+    ociRef: ghcr.io/heddles/agent-orca/openai-reference:latest
+    framework: openai-compatible
+  shell:
+    classRef: coder
+    image: ghcr.io/heddles/agent-orca/dev-sandbox:latest
+    workDir: /sandbox
+    maxTimeoutSeconds: 600
