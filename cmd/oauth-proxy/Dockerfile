@@ -7,9 +7,10 @@ WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY cmd/ cmd/
-COPY internal/ internal/
-COPY api/ api/
+# BEGIN generated go-deps (hack/gen-docker-copies; run `make docker-deps`, do not edit)
+COPY cmd/oauth-proxy/ cmd/oauth-proxy/
+COPY internal/oauth/ internal/oauth/
+# END generated go-deps
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -a -o bin/oauth-proxy ./cmd/oauth-proxy/main.go

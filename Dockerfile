@@ -11,9 +11,29 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy the Go source
-COPY cmd/ cmd/
-COPY internal/ internal/
-COPY api/ api/
+# BEGIN generated go-deps (hack/gen-docker-copies; run `make docker-deps`, do not edit)
+COPY api/v1alpha1/ api/v1alpha1/
+COPY cmd/*.go cmd/
+COPY internal/acpfs/ internal/acpfs/
+COPY internal/apiserver/ internal/apiserver/
+COPY internal/checkpoint/ internal/checkpoint/
+COPY internal/controller/ internal/controller/
+COPY internal/egress/ internal/egress/
+COPY internal/executor/ internal/executor/
+COPY internal/framework/ internal/framework/
+COPY internal/githubapp/ internal/githubapp/
+COPY internal/mcp/ internal/mcp/
+COPY internal/oauth/ internal/oauth/
+COPY internal/openshell/ internal/openshell/
+COPY internal/podbuilder/ internal/podbuilder/
+COPY internal/postgresql/ internal/postgresql/
+COPY internal/rag/*.go internal/rag/
+COPY internal/ratelimit/ internal/ratelimit/
+COPY internal/router/ internal/router/
+COPY internal/security/ internal/security/
+COPY internal/state/ internal/state/
+COPY internal/webhook/ internal/webhook/
+# END generated go-deps
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o bin/manager cmd/main.go
 

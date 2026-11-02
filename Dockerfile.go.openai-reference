@@ -6,7 +6,9 @@ ARG TARGETARCH
 WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
+# BEGIN generated go-deps (hack/gen-docker-copies; run `make docker-deps`, do not edit)
 COPY pkg/go/openai-reference/ pkg/go/openai-reference/
+# END generated go-deps
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -a -o bin/agent ./pkg/go/openai-reference/agent.go
 

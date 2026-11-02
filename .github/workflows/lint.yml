@@ -20,5 +20,7 @@ jobs:
 
       - name: Check linter configuration
         run: make lint-config
+      - name: Check Dockerfile COPY lines
+        run: make verify-docker-deps
       - name: Run linter
         run: make lint

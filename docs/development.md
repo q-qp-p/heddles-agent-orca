@@ -105,6 +105,24 @@ Always use `kubebuilder create api` and `kubebuilder create webhook` to scaffold
 The e2e tests are designed to validate the solution in an isolated environment (similar to GitHub Actions CI).
 Ensure you run them against a dedicated [Kind](https://kind.sigs.k8s.io/) cluster (not your “real” dev/prod cluster).
 
+### Dockerfile Source COPY Lines Are Generated
+Each Go image copies only the packages its binary imports, so an edit to `internal/rag`
+does not rebuild the model-router (and skaffold does not rebuild it either). The
+`# BEGIN generated go-deps` … `# END generated go-deps` block in `Dockerfile`,
+`cmd/model-router/Dockerfile`, `cmd/oauth-proxy/Dockerfile`, `Dockerfile.mcp-ingester`,
+`Dockerfile.ui-proxy` and `Dockerfile.dev-sandbox` is written by
+`hack/gen-docker-copies` from `go list -deps`; never edit it by hand.
+
+```
+make docker-deps          # Rewrite the blocks after adding or removing an import
+make verify-docker-deps   # What CI runs: fails when a block is stale
+```
+
+If an image build fails with a missing package, the import is new: run `make docker-deps`.
+A new Dockerfile that builds Go code gets the two marker lines where its `COPY` lines go,
+and an entry in `targets` in `hack/gen-docker-copies/main.go`. `.dockerignore` stays an
+allowlist: a directory a Dockerfile needs must also be re-included there.
+
 ## After Making Changes
 
 **After editing `*_types.go` or markers:**
@@ -117,6 +135,7 @@ make generate   # Regenerate DeepCopy methods
 ```
 make lint-fix   # Auto-fix code style
 make test       # Run unit tests
+make docker-deps  # If you added or removed an import of a repo package
 ```
 
 ## CLI Commands Cheat Sheet

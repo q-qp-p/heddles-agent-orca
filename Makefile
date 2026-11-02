@@ -223,6 +223,14 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify
 
+.PHONY: docker-deps
+docker-deps: ## Regenerate each Go Dockerfile's source COPY lines from the packages its binary imports.
+	go run ./hack/gen-docker-copies
+
+.PHONY: verify-docker-deps
+verify-docker-deps: ## Fail if a Go Dockerfile's generated COPY lines are stale (run make docker-deps).
+	go run ./hack/gen-docker-copies -check
+
 ##@ Build
 
 .PHONY: build
@@ -267,7 +275,7 @@ docker-push: ## Push docker image with the manager.
 
 .PHONY: docker-build-model-router
 docker-build-model-router: ## Build docker image for the model-router sidecar.
-	$(CONTAINER_TOOL) build -t ${ROUTER_IMG} -f Dockerfile.model-router .
+	$(CONTAINER_TOOL) build -t ${ROUTER_IMG} -f cmd/model-router/Dockerfile .
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:

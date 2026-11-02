@@ -18,10 +18,10 @@ ARG TARGETARCH
 WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
-COPY api/ api/
-COPY internal/ internal/
-COPY pkg/ pkg/
+# BEGIN generated go-deps (hack/gen-docker-copies; run `make docker-deps`, do not edit)
 COPY cmd/coder-agent/ cmd/coder-agent/
+COPY pkg/agent/ pkg/agent/
+# END generated go-deps
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -trimpath -o /out/coder-agent ./cmd/coder-agent
 

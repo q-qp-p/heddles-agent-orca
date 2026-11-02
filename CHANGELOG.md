@@ -146,6 +146,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Go images copy only the packages their binary imports** — the `COPY cmd/ internal/ api/`
+  lines of the Go Dockerfiles are now generated from `go list -deps` by
+  `hack/gen-docker-copies` (`make docker-deps`; CI runs `make verify-docker-deps` in the Lint
+  job). The model-router image needs 12 of the 21 `internal/` packages and `ui-proxy` none, so
+  editing an unrelated package no longer invalidates their build cache or, under skaffold,
+  rebuilds them. `Dockerfile.model-router` was a duplicate of `cmd/model-router/Dockerfile`
+  and is gone; `make docker-build-model-router` (used by the e2e suite) now builds the same
+  Dockerfile the release does. See `docs/development.md`.
 - Terminal `done` trace event is now emitted by the model-router whenever the
   OpenAI turn loop ends without dispatching tools (previously only the `_done`
   built-in emitted it, so framework agents never produced a terminal marker);
