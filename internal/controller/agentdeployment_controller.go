@@ -209,7 +209,14 @@ func (r *AgentDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// Resolve provider secret volumes.
-	providerVolumes, providerMounts, err := podbuilder.ResolveProviderVolumes(ctx, r.Client, deployment.Namespace, &agent)
+	shadow, err := shadowFor(ctx, r.Client, &agent, shadowSource{Deployment: true})
+	if err != nil {
+		deployment.Status.Phase = agentorcav1alpha1.AgentDeploymentPhaseFailed
+		deployment.Status.Message = fmt.Sprintf("resolving routing benchmark: %v", err)
+		_ = r.Status().Patch(ctx, &deployment, client.MergeFrom(statusBase))
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	providerVolumes, providerMounts, err := podbuilder.ResolveProviderVolumes(ctx, r.Client, deployment.Namespace, &agent, shadow.secretNames()...)
 	if err != nil {
 		deployment.Status.Phase = agentorcav1alpha1.AgentDeploymentPhaseFailed
 		deployment.Status.Message = fmt.Sprintf("resolving provider volumes: %v", err)
@@ -483,6 +490,10 @@ func (r *AgentDeploymentReconciler) buildDeploymentRouterConfig( //nolint:gocycl
 		}
 	}
 	providers := routing.Providers
+	shadow, err := resolveShadow(ctx, r.Client, agent, shadowSource{Deployment: true}, routing)
+	if err != nil {
+		return nil, err
+	}
 
 	var toolDefs []router.ToolDefinition
 	var mcpServers []router.MCPServerConfig
@@ -858,6 +869,8 @@ func (r *AgentDeploymentReconciler) buildDeploymentRouterConfig( //nolint:gocycl
 		Providers:                  providers,
 		Strategy:                   routing.Strategy,
 		Switchyard:                 routing.Switchyard,
+		Shadow:                     shadow.Config,
+		AuxProviders:               shadow.Aux,
 		CapabilityRouting:          routing.CapabilityRouting,
 		FallbackChain:              routing.FallbackChain,
 		MetaRouterProviderName:     routing.MetaRouterProviderName,

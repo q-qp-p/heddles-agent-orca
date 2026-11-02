@@ -77,7 +77,7 @@ func tenantCtx(t *TenantIdentity) context.Context {
 	return context.WithValue(context.Background(), tenantIdentityKey, t)
 }
 
-var ada = &TenantIdentity{TenantName: "acme", Namespaces: []string{"team-a"}, UserID: "ada"}
+var ada = &TenantIdentity{TenantName: shadowTenant, Namespaces: []string{"team-a"}, UserID: "ada"}
 
 func TestRunFeedback_StoresARatingOfADecision(t *testing.T) {
 	store := &fakeFeedbackStore{}
@@ -89,7 +89,7 @@ func TestRunFeedback_StoresARatingOfADecision(t *testing.T) {
 	}
 	got := store.rows["team-a|run-1|d-1|ada"]
 	if got.Rating != -1 || got.Comment != "wrong model" || got.Source != postgresql.FeedbackSourceUI ||
-		got.Tenant != "acme" || got.TurnIndex == nil || *got.TurnIndex != 2 {
+		got.Tenant != shadowTenant || got.TurnIndex == nil || *got.TurnIndex != 2 {
 		t.Errorf("stored = %+v", got)
 	}
 }
@@ -138,7 +138,7 @@ func TestRunFeedback_TenantsReachOnlyTheirNamespaces(t *testing.T) {
 func TestRunFeedback_GetReturnsOnlyTheCallersRatings(t *testing.T) {
 	store := &fakeFeedbackStore{}
 	s := &UIServer{feedback: store}
-	bob := &TenantIdentity{TenantName: "acme", Namespaces: []string{"team-a"}, UserID: "bob"}
+	bob := &TenantIdentity{TenantName: shadowTenant, Namespaces: []string{"team-a"}, UserID: "bob"}
 	feedbackReq(s, tenantCtx(ada), http.MethodPost, "/api/runs/team-a/run-1/feedback", `{"rating":1,"decisionId":"d-1"}`)
 	feedbackReq(s, tenantCtx(bob), http.MethodPost, "/api/runs/team-a/run-1/feedback", `{"rating":-1,"decisionId":"d-1"}`)
 
@@ -191,8 +191,8 @@ func taskFeedback(t *testing.T, store feedbackStore, tenant *TenantIdentity, tas
 
 func TestTaskFeedback_StoresAnAPIRating(t *testing.T) {
 	store := &fakeFeedbackStore{}
-	tenant := &TenantIdentity{TenantName: "acme", Namespaces: []string{"team-a"}}
-	rec := taskFeedback(t, store, tenant, "acme", `{"rating":1,"comment":"nice"}`)
+	tenant := &TenantIdentity{TenantName: shadowTenant, Namespaces: []string{"team-a"}}
+	rec := taskFeedback(t, store, tenant, shadowTenant, `{"rating":1,"comment":"nice"}`)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
@@ -204,7 +204,7 @@ func TestTaskFeedback_StoresAnAPIRating(t *testing.T) {
 
 func TestTaskFeedback_AnotherTenantsTaskDoesNotExist(t *testing.T) {
 	store := &fakeFeedbackStore{}
-	tenant := &TenantIdentity{TenantName: "acme", Namespaces: []string{"team-a"}}
+	tenant := &TenantIdentity{TenantName: shadowTenant, Namespaces: []string{"team-a"}}
 	if rec := taskFeedback(t, store, tenant, "globex", `{"rating":1}`); rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
@@ -214,12 +214,12 @@ func TestTaskFeedback_AnotherTenantsTaskDoesNotExist(t *testing.T) {
 }
 
 func TestTaskFeedback_InvalidAndUnavailable(t *testing.T) {
-	tenant := &TenantIdentity{TenantName: "acme", Namespaces: []string{"team-a"}}
-	rec := taskFeedback(t, &fakeFeedbackStore{}, tenant, "acme", `{"rating":9}`)
+	tenant := &TenantIdentity{TenantName: shadowTenant, Namespaces: []string{"team-a"}}
+	rec := taskFeedback(t, &fakeFeedbackStore{}, tenant, shadowTenant, `{"rating":9}`)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"error"`) {
 		t.Errorf("bad rating: status %d body %s", rec.Code, rec.Body)
 	}
-	rec = taskFeedback(t, nil, tenant, "acme", `{"rating":1}`)
+	rec = taskFeedback(t, nil, tenant, shadowTenant, `{"rating":1}`)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("no store: status = %d, want 503", rec.Code)
 	}

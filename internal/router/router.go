@@ -77,6 +77,7 @@ type Router struct {
 	metaRouter        *MetaRouter
 	selector          Selector       // picks the provider for each call; see selectorOrDefault
 	telemetry         *telemetrySink // routing telemetry to the operator; nil when no operator API is configured
+	shadow            *shadowRunner  // RoutingBenchmark replays; nil when no benchmark samples this run
 	store             state.Store
 	priorMessages     []Message       // conversation history before the current turn (checkpoint + folded turns)
 	messages          []Message       // the current turn: client input, assistant replies, tool results
@@ -261,6 +262,9 @@ func New(cfg *Config, store state.Store, initialMessages []json.RawMessage, exec
 
 	if cfg.RunName != "" && cfg.OperatorAPIURL != "" {
 		r.telemetry = newTelemetrySink(r.postRoutingEvents, nil)
+	}
+	if cfg.RunName != "" && cfg.OperatorAPIURL != "" {
+		r.shadow = newShadowRunner(r, cfg.Shadow)
 	}
 	if cfg.Strategy == strategySwitchyard {
 		r.selector = r.newSwitchyardOrLegacy(r.selector)
@@ -2172,6 +2176,8 @@ func (r *Router) Finalize() {
 	// Routing telemetry queued by the last calls must reach the operator before
 	// the pod goes, whatever state the run ended in.
 	defer r.flushTelemetry()
+	// A replay still running when the run ends gets a moment to file its result.
+	r.shadow.wait(shadowFinalizeWait)
 	r.mu.Lock()
 	alreadyTerminal := r.doneExplicit || r.failedExplicit || r.loopDetected || r.handedOff || r.waitingForInput
 	r.mu.Unlock()

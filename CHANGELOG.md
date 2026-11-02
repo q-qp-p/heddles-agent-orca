@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **RoutingBenchmark** — a new resource that measures how well routing serves a set of Agents, chosen by
+  `agentRefs` or an `agentSelector`. Evidence is kept per Agent, whether its work runs as an AgentRun, an
+  AgentDeployment or a workflow step, so it builds up across runs. The operator validates the benchmark,
+  stores shadow results and budget leases in Postgres (migration `0005`), and reports judged pairs, judge
+  disagreement and shadow spend in its status. The internal API gains `shadow-lease` and
+  `shadow-results`. The model-router replays a sample of calls on the other model and has a judge compare
+  the answers, in the background and without running tools or touching the user's stream. Each Agent is
+  held to `shadow.maxPerHour` samples, and a deployment is held to `budget.perRunUSD` per day.
 - **Rating how models were chosen** — thumbs up or down on a run or on one routing decision, with an
   optional comment. In the run view the thumbs sit on each "routed" row and under the output; through
   the task API it is `POST /v1/tasks/{id}/feedback`, and through the UI API
@@ -214,6 +222,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strict clients (previously rejected with `-32602 Invalid params`).
 
 ### Fixed
+
+- **A deployment's routing events were never recorded.** The operator looked the sidecar up as an
+  AgentRun, and a deployment's sidecar posts under the deployment's name, so every post was refused
+  with a 404. The operator now accepts either. Its network policy also admitted only run pods on the
+  internal API port (`:8082`), so a deployment's sidecar could not reach it at all; it now admits
+  deployment pods too.
 
 - **OpenAI gpt-6 models failed every tool call** — OpenAI answers HTTP 400 ("Function tools with
   reasoning_effort are not supported ... use /v1/responses") when a request with tools reaches these

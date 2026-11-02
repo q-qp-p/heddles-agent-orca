@@ -76,6 +76,11 @@ type Config struct {
 	Strategy string
 	// Switchyard is the algorithm of the "switchyard" strategy.
 	Switchyard *SwitchyardConfig `json:"switchyard,omitempty"`
+	// Shadow replays a sample of calls on another model for a RoutingBenchmark.
+	Shadow *ShadowConfig `json:"shadow,omitempty"`
+	// AuxProviders are providers the router may call but never routes to: the
+	// benchmark's judge and any shadow targets outside the selector.
+	AuxProviders []ProviderConfig `json:"auxProviders,omitempty"`
 	// CapabilityRouting maps capability tags to provider names.
 	CapabilityRouting map[string]string
 	// FallbackChain is the ordered list of provider names used on 429/5xx.

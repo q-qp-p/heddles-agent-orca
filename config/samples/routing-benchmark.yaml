@@ -1,0 +1,28 @@
+# Measures routing for every Agent labelled team=platform: 5% of their calls are
+# replayed on the other model and a third model judges which answer is better.
+# It applies to the Agent's work however it runs (an AgentRun, an AgentDeployment
+# or a workflow step), and evidence is kept per Agent. Nothing is changed for you;
+# read the results with
+#   kubectl get routingbenchmark platform-bench -o yaml
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: RoutingBenchmark
+metadata:
+  name: platform-bench
+spec:
+  # Name Agents, select them by label, or both. An empty selector ({}) means
+  # every Agent in the namespace.
+  agentSelector:
+    matchLabels:
+      team: platform
+  mode: reportOnly
+  shadow:
+    enabled: true
+    sampleRate: "0.05"
+    maxPerRun: 3     # per AgentRun
+    maxPerHour: 20   # per Agent, across all its runs and deployments
+  judge:
+    # Use a model that is not one of the two being compared.
+    providerRef: judge
+  budget:
+    perDayUSD: "2.00"
+    perRunUSD: "0.25"

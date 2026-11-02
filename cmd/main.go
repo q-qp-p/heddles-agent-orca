@@ -401,6 +401,14 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "ModelSelector")
 		os.Exit(1)
 	}
+	benchmarks := &controller.RoutingBenchmarkReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}
+	if pgStore != nil {
+		benchmarks.Results = pgStore
+	}
+	if err := benchmarks.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "RoutingBenchmark")
+		os.Exit(1)
+	}
 	if err := (&controller.ToolReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -594,6 +602,7 @@ func main() {
 		internalAPI.WithApprovals(pgStore, notifier)
 		// Routing telemetry: one row per LLM call, posted by each run's router.
 		internalAPI.WithRoutingStore(pgStore)
+		internalAPI.WithShadowStore(pgStore)
 		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 			return pgStore.RunRoutingEventsRetention(ctx, routingEventsRetention, postgresql.RoutingEventsRetentionInterval)
 		})); err != nil {

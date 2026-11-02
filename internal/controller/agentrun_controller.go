@@ -328,7 +328,11 @@ func (r *AgentRunReconciler) startRun(ctx context.Context, run *agentorcav1alpha
 	}
 
 	// 7. Resolve provider secrets for volume mounts.
-	providerVolumes, providerMounts, err := podbuilder.ResolveProviderVolumes(ctx, r.Client, run.Namespace, agent)
+	shadow, err := shadowFor(ctx, r.Client, agent, shadowSource{RunLabels: run.Labels})
+	if err != nil {
+		return r.failRun(ctx, run, fmt.Sprintf("resolving routing benchmark: %v", err))
+	}
+	providerVolumes, providerMounts, err := podbuilder.ResolveProviderVolumes(ctx, r.Client, run.Namespace, agent, shadow.secretNames()...)
 	if err != nil {
 		return r.failRun(ctx, run, fmt.Sprintf("resolving provider volumes: %v", err))
 	}
@@ -811,13 +815,17 @@ func (r *AgentRunReconciler) buildRouterConfig( //nolint:gocyclo
 		}
 	}
 	providers := routing.Providers
+	shadow, err := resolveShadow(ctx, r.Client, agent, shadowSource{RunLabels: run.Labels}, routing)
+	if err != nil {
+		return nil, nil, false, err
+	}
 
 	// Resolve Tools.
 	var toolDefs []router.ToolDefinition
 	var egressRules []agentorcav1alpha1.EgressRule
 
-	// Add egress rules for model provider endpoints.
-	for _, p := range providers {
+	// Add egress rules for model provider endpoints, including the benchmark's judge.
+	for _, p := range append(slices.Clone(providers), shadow.Aux...) {
 		if port := providerPort(p.BaseURL, p.LiteLLMModel); port != 443 {
 			egressRules = append(egressRules, agentorcav1alpha1.EgressRule{Port: int32(port), Protocol: "TCP"})
 		}
@@ -1227,6 +1235,8 @@ func (r *AgentRunReconciler) buildRouterConfig( //nolint:gocyclo
 		Providers:                  providers,
 		Strategy:                   routing.Strategy,
 		Switchyard:                 routing.Switchyard,
+		Shadow:                     shadow.Config,
+		AuxProviders:               shadow.Aux,
 		CapabilityRouting:          routing.CapabilityRouting,
 		FallbackChain:              routing.FallbackChain,
 		MetaRouterProviderName:     routing.MetaRouterProviderName,

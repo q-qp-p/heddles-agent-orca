@@ -4,6 +4,7 @@
 resources:
 - bases/agentorca.agentorca.io_modelproviders.yaml
 - bases/agentorca.agentorca.io_modelselectors.yaml
+- bases/agentorca.agentorca.io_routingbenchmarks.yaml
 - bases/agentorca.agentorca.io_tools.yaml
 - bases/agentorca.agentorca.io_agents.yaml
 - bases/agentorca.agentorca.io_agentruns.yaml

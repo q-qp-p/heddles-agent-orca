@@ -149,3 +149,45 @@ A person can rate how the models were chosen, on a whole run or on one routing d
 
 Rating the same target again replaces the earlier rating. Ratings are stored in PostgreSQL
 (`routing_feedback`); without it, rating is refused with a 503 instead of being dropped.
+
+## Benchmarking routing
+
+A `RoutingBenchmark` measures whether routing's choices are worth their cost for a set of Agents. It replays a small sample of their calls on another model, has a judge model compare the two answers, and records the verdict. Nothing the user sees changes: the replay runs after the served answer is complete, never runs a tool, and is paid from the benchmark's own budget, not the run's.
+
+```yaml
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: RoutingBenchmark
+spec:
+  agentSelector: {matchLabels: {team: platform}}
+  shadow: {enabled: true, sampleRate: "0.05"}
+  judge: {providerRef: judge}
+  budget: {perDayUSD: "2.00"}
+```
+
+**Routing is judged per Agent.** Every AgentRun, AgentDeployment and workflow step names an Agent, and an Agent names the ModelSelector that routes it, so the Agent is what the evidence belongs to. A one-off run adds to the same pool as the runs and deployments of its Agent before and after it. Pick Agents with `agentRefs`, an `agentSelector`, or both; an empty selector (`{}`) means every Agent in the namespace. The result of a sample records which Agent it came from, whether it ran as a run or a deployment, and the generation of the ModelSelector that routed it, so evidence from before and after a change to the selector can be told apart.
+
+See `config/samples/routing-benchmark.yaml`. The controller reports `Ready` (false when no Agent matches, a named Agent or a selector is missing, or a provider is missing), plus two warnings:
+
+- `PostgresUnavailable`: the operator has no Postgres, so results cannot be stored.
+- `JudgeIsArm`: the judge is also one of the models compared, which lets it favour its own answers. This is a warning, not an error.
+
+`status` carries the Agents covered, the judged pairs, how often the judge disagreed with itself when the two answers were swapped, today's spend, and a verdict count per task category of each Agent.
+
+**Budget.** `budget.perDayUSD` is required. Before each replay the router asks the operator for a lease on the budget, counting settled spend and leases not yet settled, so several runs cannot overspend together. A denied lease, or an operator without Postgres, means no replay. An unsettled lease expires after ten minutes. The operator also checks that the benchmark covers the Agent of the pod that asks, so a pod can spend only the budget of a benchmark that measures its own Agent.
+
+**Limits that follow the Agent.** `shadow.maxPerRun` (default 3) caps the calls sampled from one AgentRun. A deployment keeps running, so it has no per-run cap; `shadow.maxPerHour` (default 20) caps the samples each Agent gets per hour across all its runs and deployments, so one busy Agent cannot use the day's budget. `budget.perRunUSD` applies to a deployment per UTC day. `shadow.excludeRunSelector` leaves out AgentRuns by label, for example experiments; to leave an Agent out, leave it out of the selector.
+
+**Privacy.** Only the verdict, its scores and the costs are stored. The prompt and both answers are kept only when `storeTranscripts: true`.
+
+**How a replay works.** After a sampled call has been answered in full, the router, in the background and one at a time:
+
+1. asks the operator for a budget lease;
+2. sends the same request, tools included, to the other model, without streaming. If that model asks for a tool the call is counted and shown to the judge, never run;
+3. asks the judge twice, with the two answers in opposite order. If the two verdicts disagree about which answer won, the result is a tie marked inconsistent. A reply that is not the expected JSON is recorded as `invalid`;
+4. files the verdict and the costs, which releases the lease.
+
+Which call is sampled is decided from its decision ID, so the same call is always in or out. `shadow.arms: counterfactual` replays on the other tier: the `capable` provider when `efficient` served, and the reverse; without those roles, the cheapest other provider (or the dearest, when the served one is already the cheapest). `arms: providers` replays on each listed provider.
+
+Both AgentRuns and AgentDeployments are sampled. The judge's credentials are mounted on the pod even when the judge is not one of the selector's providers. A deployment's pods restart when its benchmark changes, as they do when its ModelSelector changes.
+
+The recommendations built from these results come later.

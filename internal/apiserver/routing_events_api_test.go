@@ -87,6 +87,27 @@ func TestRecordRoutingEvents_StoresWithServerSideAttribution(t *testing.T) {
 	}
 }
 
+// A deployment's sidecar posts under the deployment's name, which is not an
+// AgentRun. Its events used to be refused with a 404, so a deployment's routing
+// was never recorded.
+func TestRecordRoutingEvents_AcceptsADeploymentSidecar(t *testing.T) {
+	store := &fakeRoutingStore{}
+	dep := &agentorcav1alpha1.AgentDeployment{ObjectMeta: metav1.ObjectMeta{
+		Name: "assistant", Namespace: defaultNamespace, Labels: map[string]string{"agentorca.io/tenant": "acme"},
+	}}
+	s := &Server{crdClient: fake.NewClientBuilder().WithScheme(adminScheme(t)).WithObjects(dep).Build()}
+	s.WithRoutingStore(store)
+	if code := postRoutingEvents(s, routingCallerOK, "assistant", `{"events":[{"decisionID":"d-1","provider":"p"}]}`); code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", code)
+	}
+	if len(store.got) != 1 || store.got[0].RunName != "assistant" || store.got[0].Tenant != "acme" {
+		t.Errorf("stored = %+v, want one event attributed to the deployment and its tenant", store.got)
+	}
+	if code := postRoutingEvents(s, routingCallerOK, "ghost", `{"events":[{"decisionID":"d-1","provider":"p"}]}`); code != http.StatusNotFound {
+		t.Errorf("unknown source = %d, want 404", code)
+	}
+}
+
 func TestRecordRoutingEvents_RejectsOtherNamespaces(t *testing.T) {
 	store := &fakeRoutingStore{}
 	s := routingEventsServer(t, store)

@@ -190,3 +190,38 @@ func TestResolveProviderVolumes_PrimaryAlsoInFallback_NoDuplicateVolume(t *testi
 	}
 	_ = corev1.Volume{} // keep import
 }
+
+func TestResolveProviderVolumes_ExtraProvidersAreMounted(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := agentorcav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	provider := func(name string) *agentorcav1alpha1.ModelProvider {
+		return &agentorcav1alpha1.ModelProvider{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: agentorcav1alpha1.ModelProviderSpec{
+				LiteLLMModel:   "openai/gpt-4o",
+				CredentialsRef: agentorcav1alpha1.SecretKeyRef{Name: "s-" + name, Key: "api-key"},
+			},
+		}
+	}
+	selector := &agentorcav1alpha1.ModelSelector{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "default"},
+		Spec: agentorcav1alpha1.ModelSelectorSpec{
+			Providers: []agentorcav1alpha1.ProviderWeight{{Name: "main", Weight: 100}},
+		},
+	}
+	agent := &agentorcav1alpha1.Agent{Spec: agentorcav1alpha1.AgentSpec{ModelSelectorRef: "default"}}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(selector, provider("main"), provider("judge")).Build()
+
+	_, mounts, err := ResolveProviderVolumes(context.Background(), cl, "default", agent, "judge", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mounts) != 2 {
+		t.Fatalf("mounts = %+v, want main and judge once each", mounts)
+	}
+	if _, _, err := ResolveProviderVolumes(context.Background(), cl, "default", agent, "ghost"); err == nil {
+		t.Error("a missing extra provider must fail: the router would be configured with a judge it cannot call")
+	}
+}

@@ -25,9 +25,6 @@ import (
 	"net/http"
 	"time"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	agentorcav1alpha1 "github.com/heddles/agent-orca/api/v1alpha1"
 	"github.com/heddles/agent-orca/internal/postgresql"
 )
 
@@ -94,12 +91,12 @@ func (s *Server) recordRoutingEvents(w http.ResponseWriter, r *http.Request, cal
 		return
 	}
 
-	var run agentorcav1alpha1.AgentRun
-	if err := s.crdClient.Get(r.Context(), client.ObjectKey{Name: name, Namespace: namespace}, &run); err != nil {
-		http.Error(w, fmt.Sprintf("getting AgentRun: %v", err), http.StatusNotFound)
+	src, err := s.resolveSource(r.Context(), namespace, name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	tenant := run.Labels["agentorca.io/tenant"]
+	tenant := src.Tenant
 	now := time.Now().UTC()
 	for i := range req.Events {
 		e := &req.Events[i]

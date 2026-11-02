@@ -66,6 +66,7 @@ rules:
   - mcpservers
   - modelproviders
   - modelselectors
+  - routingbenchmarks
   - tenantconfigs
   - tools
   verbs:
@@ -87,6 +88,7 @@ rules:
   - mcpservers/finalizers
   - modelproviders/finalizers
   - modelselectors/finalizers
+  - routingbenchmarks/finalizers
   - tenantconfigs/finalizers
   - tools/finalizers
   verbs:
@@ -102,6 +104,7 @@ rules:
   - mcpservers/status
   - modelproviders/status
   - modelselectors/status
+  - routingbenchmarks/status
   - tenantconfigs/status
   - tools/status
   verbs:

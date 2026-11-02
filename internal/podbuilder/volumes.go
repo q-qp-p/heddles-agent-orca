@@ -55,11 +55,13 @@ func OAuthCredsMountDir(toolName, secretName string) string {
 }
 
 // ResolveProviderVolumes builds volume + mount lists for provider API key secrets.
+// extra names further ModelProviders to mount that the selector does not list.
 func ResolveProviderVolumes(
 	ctx context.Context,
 	reader client.Reader,
 	namespace string,
 	agent *agentorcav1alpha1.Agent,
+	extra ...string,
 ) ([]corev1.Volume, []corev1.VolumeMount, error) {
 	var selector agentorcav1alpha1.ModelSelector
 	if err := reader.Get(ctx, client.ObjectKey{Name: agent.Spec.ModelSelectorRef, Namespace: namespace}, &selector); err != nil {
@@ -111,6 +113,13 @@ func ResolveProviderVolumes(
 	}
 	for _, name := range selector.Spec.FallbackChain {
 		if err := mountProvider(name, true); err != nil {
+			return nil, nil, err
+		}
+	}
+	// Providers outside the selector that the pod still calls, such as a
+	// benchmark's judge.
+	for _, name := range extra {
+		if err := mountProvider(name, false); err != nil {
 			return nil, nil, err
 		}
 	}

@@ -510,6 +510,12 @@ func (r *Router) handleStreamingResponse(w http.ResponseWriter, req *http.Reques
 		ToolCalls: toolCalls,
 	}
 
+	// A RoutingBenchmark may replay this call on another model after the fact;
+	// it runs in the background, runs no tool and is not charged to this run.
+	if ct != nil && spendOutcome == spendOutcomeSuccess {
+		r.shadow.consider(servedCall{ev: ct.ev, served: ct.provider, req: chatReq, answer: assistantMsg, usage: usage})
+	}
+
 	if r.cfg.Hindsight.Enabled {
 
 		bankID, errEnsureHindsightBank := r.ensureHindsightBank(req.Context())

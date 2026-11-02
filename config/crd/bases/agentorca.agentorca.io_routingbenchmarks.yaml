@@ -1,0 +1,523 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: routingbenchmarks.agentorca.agentorca.io
+spec:
+  group: agentorca.agentorca.io
+  names:
+    kind: RoutingBenchmark
+    listKind: RoutingBenchmarkList
+    plural: routingbenchmarks
+    singular: routingbenchmark
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .status.judgedPairs
+      name: Pairs
+      type: integer
+    - jsonPath: .status.shadowSpendTodayUSD
+      name: Spend
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          RoutingBenchmark measures how well routing serves a set of Agents, and what
+          each routing choice costs against what it buys.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              RoutingBenchmarkSpec asks agent-orca to measure how well routing serves a set
+              of Agents: to replay a sample of their calls on another model, have a judge
+              compare the two answers, and report whether each routing choice was worth its
+              cost. Evidence is kept per Agent, whether the work ran as an AgentRun, an
+              AgentDeployment or a workflow step, so it builds up across runs.
+            properties:
+              agentRefs:
+                description: AgentRefs names Agents, in this namespace, to benchmark.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
+              agentSelector:
+                description: |-
+                  AgentSelector picks Agents, in this namespace, by label. An empty selector
+                  matches every Agent. An Agent named in agentRefs is benchmarked as well.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              approverGroups:
+                description: |-
+                  ApproverGroups are the groups allowed to approve a recommendation. Required
+                  when mode is proposeApply.
+                items:
+                  type: string
+                type: array
+              budget:
+                description: |-
+                  Budget caps what shadow and judge calls may spend. It does not cap the
+                  runs themselves; those keep the selector's own budget.
+                properties:
+                  perDayUSD:
+                    description: |-
+                      PerDayUSD is the most shadow and judge calls may spend in a UTC day,
+                      for example "2.00". Sampling stops for the day once it is reached.
+                    pattern: ^\d+(\.\d{1,6})?$
+                    type: string
+                  perRunUSD:
+                    description: |-
+                      PerRunUSD is the most they may spend on one run. A deployment counts as one
+                      run for each UTC day.
+                    pattern: ^\d+(\.\d{1,6})?$
+                    type: string
+                required:
+                - perDayUSD
+                type: object
+              evaluation:
+                description: Evaluation says how results are grouped and how much
+                  evidence is enough.
+                properties:
+                  confidenceLevel:
+                    default: "0.95"
+                    description: ConfidenceLevel is the confidence of the intervals
+                      reported.
+                    pattern: ^0\.\d+$
+                    type: string
+                  groupBy:
+                    default:
+                    - stage
+                    description: |-
+                      GroupBy picks the task categories results are grouped by within each
+                      Agent: stage, workflowStep or syLabel. Results are always kept per Agent.
+                    items:
+                      type: string
+                    type: array
+                  interval:
+                    default: 6h
+                    description: Interval is how often the benchmark is re-evaluated.
+                    type: string
+                  minSamples:
+                    default: 30
+                    description: |-
+                      MinSamples is the judged pairs needed per category and arm pair before a
+                      finding is reported.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  window:
+                    default: 168h
+                    description: Window is how far back results count.
+                    type: string
+                type: object
+              judge:
+                description: Judge is the model that compares a served answer with
+                  its shadow answer.
+                properties:
+                  maxTokens:
+                    default: 512
+                    description: MaxTokens bounds one judge reply.
+                    format: int32
+                    minimum: 64
+                    type: integer
+                  positionSwap:
+                    default: true
+                    description: |-
+                      PositionSwap asks the judge twice with the two answers in opposite order and
+                      counts a disagreement as a tie, which removes position bias.
+                    type: boolean
+                  providerRef:
+                    description: |-
+                      ProviderRef is the ModelProvider, in this namespace, that judges. It should
+                      not be one of the models being compared; JudgeIsArm warns when it is.
+                    minLength: 1
+                    type: string
+                  rubric:
+                    description: Rubric replaces the default grading instructions.
+                    maxLength: 4000
+                    type: string
+                required:
+                - providerRef
+                type: object
+              mode:
+                default: reportOnly
+                description: |-
+                  Mode says what happens to a recommendation. reportOnly leaves it for a
+                  person to read and apply. proposeApply raises an approval request for it,
+                  and applies it only once approved.
+                enum:
+                - reportOnly
+                - proposeApply
+                type: string
+              shadow:
+                description: |-
+                  Shadow configures the counterfactual calls. Without it the benchmark reads
+                  passive outcomes and feedback only.
+                properties:
+                  arms:
+                    default: counterfactual
+                    description: Arms says which models a sampled call is replayed
+                      on.
+                    enum:
+                    - counterfactual
+                    - providers
+                    type: string
+                  enabled:
+                    default: false
+                    description: Enabled turns sampling on.
+                    type: boolean
+                  excludeRunSelector:
+                    description: |-
+                      ExcludeRunSelector skips AgentRuns whose labels match it, for example runs
+                      labelled as experiments. Deployments are never excluded this way.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  includeToolTurns:
+                    default: true
+                    description: |-
+                      IncludeToolTurns samples calls that end in tool calls too. The replay never
+                      runs a tool: the judge compares which tools each model chose to call.
+                    type: boolean
+                  maxPerHour:
+                    default: 20
+                    description: |-
+                      MaxPerHour is the most calls sampled per hour for each Agent, across all
+                      its runs and deployments. It stops one busy Agent using the whole budget.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  maxPerRun:
+                    default: 3
+                    description: |-
+                      MaxPerRun is the most calls sampled from one AgentRun. It does not apply
+                      to an AgentDeployment, which keeps running; maxPerHour bounds that.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  providers:
+                    description: Providers are the ModelProviders to replay on when
+                      arms is providers.
+                    items:
+                      type: string
+                    type: array
+                  sampleRate:
+                    default: "0.05"
+                    description: |-
+                      SampleRate is the fraction of calls to replay, from 0 to 1. The choice is
+                      made from the decision ID, so the same call is always in or out.
+                    pattern: ^(0(\.\d+)?|1(\.0+)?)$
+                    type: string
+                type: object
+              storeTranscripts:
+                default: false
+                description: |-
+                  StoreTranscripts keeps the prompt and the two answers of each sampled call so
+                  a person can read the judge's reasoning. Off by default: without it only the
+                  verdict, its scores and the cost are stored.
+                type: boolean
+              thresholds:
+                description: Thresholds say when a difference is worth acting on.
+                properties:
+                  deadProviderErrorRate:
+                    default: "0.5"
+                    description: |-
+                      DeadProviderErrorRate is the error rate above which a provider is reported
+                      as dead.
+                    pattern: ^(0(\.\d+)?|1(\.0+)?)$
+                    type: string
+                  maxUSDPerNetWin:
+                    description: |-
+                      MaxUSDPerNetWin is the most you would pay for one extra judged win. Unset,
+                      the cost per net win is reported but no recommendation is made from it.
+                    pattern: ^\d+(\.\d{1,6})?$
+                    type: string
+                  minNetWinDelta:
+                    description: MinNetWinDelta is the smallest net win rate worth
+                      reporting.
+                    pattern: ^0(\.\d+)?$
+                    type: string
+                  nonInferiorityMargin:
+                    default: "0.05"
+                    description: |-
+                      NonInferiorityMargin is how much worse than the capable model the cheaper one
+                      may be, as a win-rate difference, and still count as equal.
+                    pattern: ^0(\.\d+)?$
+                    type: string
+                type: object
+            required:
+            - budget
+            type: object
+            x-kubernetes-validations:
+            - message: name the Agents to benchmark with agentRefs or agentSelector
+                (an empty agentSelector matches every Agent)
+              rule: (has(self.agentRefs) && size(self.agentRefs) > 0) || has(self.agentSelector)
+            - message: approverGroups is required when mode is proposeApply
+              rule: '!has(self.mode) || self.mode != ''proposeApply'' || (has(self.approverGroups)
+                && size(self.approverGroups) > 0)'
+            - message: judge is required when shadow sampling is enabled
+              rule: '!has(self.shadow) || !has(self.shadow.enabled) || !self.shadow.enabled
+                || has(self.judge)'
+            - message: shadow.providers is required when shadow.arms is providers
+              rule: '!has(self.shadow) || !has(self.shadow.arms) || self.shadow.arms
+                != ''providers'' || (has(self.shadow.providers) && size(self.shadow.providers)
+                > 0)'
+          status:
+            description: RoutingBenchmarkStatus is the observed state of a RoutingBenchmark.
+            properties:
+              budgetExhausted:
+                description: BudgetExhausted is true once today's budget is spent.
+                type: boolean
+              categories:
+                description: |-
+                  Categories summarises each task category of each Agent, the best sampled
+                  first, up to 200.
+                items:
+                  description: CategorySummary is what the benchmark found for one
+                    task category of one Agent.
+                  properties:
+                    agent:
+                      description: Agent is the Agent whose calls these are.
+                      type: string
+                    category:
+                      description: Category is the group key, such as "stage:tool-exec".
+                      type: string
+                    samples:
+                      description: Samples is the judged pairs in the window.
+                      format: int32
+                      type: integer
+                    servedWins:
+                      description: ServedWins, ShadowWins and Ties count the judge's
+                        verdicts.
+                      format: int32
+                      type: integer
+                    shadowWins:
+                      format: int32
+                      type: integer
+                    ties:
+                      format: int32
+                      type: integer
+                  required:
+                  - agent
+                  - category
+                  - samples
+                  type: object
+                maxItems: 200
+                type: array
+                x-kubernetes-list-map-keys:
+                - agent
+                - category
+                x-kubernetes-list-type: map
+              conditions:
+                description: Conditions holds Ready, PostgresUnavailable and JudgeIsArm.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              inconsistentJudgments:
+                format: int32
+                type: integer
+              judgeInconsistentRate:
+                description: |-
+                  JudgeInconsistentRate is InconsistentJudgments over JudgedPairs, as a
+                  decimal string. A high rate means the judge cannot tell the answers apart.
+                type: string
+              judgedPairs:
+                format: int32
+                type: integer
+              lastEvaluated:
+                description: LastEvaluated is when the results were last read.
+                format: date-time
+                type: string
+              matchedAgents:
+                description: MatchedAgents are the Agents the benchmark covers now,
+                  up to 100.
+                items:
+                  type: string
+                maxItems: 100
+                type: array
+                x-kubernetes-list-type: set
+              observedGeneration:
+                description: ObservedGeneration is the spec generation the conditions
+                  describe.
+                format: int64
+                type: integer
+              sampledCalls:
+                description: SampledCalls, JudgedPairs and InconsistentJudgments count
+                  results in the window.
+                format: int32
+                type: integer
+              shadowSpendTodayUSD:
+                description: ShadowSpendTodayUSD is what shadow and judge calls have
+                  cost today (UTC).
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
