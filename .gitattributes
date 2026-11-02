@@ -1,0 +1,7 @@
+# Switchyard's WebAssembly guest is a 7 MB build product: it is stored in Git LFS,
+# not as a blob in history. Clone with git-lfs installed (git lfs install), or run
+# git lfs pull afterwards; see "Bumping Switchyard" in docs/development.md.
+*.wasm filter=lfs diff=lfs merge=lfs -text
+
+# Vendored upstream code: not ours to count in language statistics.
+third_party/** linguist-vendored

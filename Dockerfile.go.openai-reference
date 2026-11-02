@@ -5,6 +5,11 @@ ARG TARGETARCH
 
 WORKDIR /workspace
 COPY go.mod go.sum ./
+# A go.mod replace to a local directory needs that directory's go.mod before the download.
+# BEGIN generated go-mod-replaces (hack/gen-docker-copies; run `make docker-deps`, do not edit)
+COPY third_party/switchyard/bindings/go/go.mod third_party/switchyard/bindings/go/go.mod
+COPY third_party/switchyard/bindings/go/go.sum third_party/switchyard/bindings/go/go.sum
+# END generated go-mod-replaces
 RUN go mod download
 # BEGIN generated go-deps (hack/gen-docker-copies; run `make docker-deps`, do not edit)
 COPY pkg/go/openai-reference/ pkg/go/openai-reference/

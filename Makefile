@@ -227,6 +227,15 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 docker-deps: ## Regenerate each Go Dockerfile's source COPY lines from the packages its binary imports.
 	go run ./hack/gen-docker-copies
 
+.PHONY: switchyard-update
+switchyard-update: ## Vendor Switchyard at SHA=<40 character commit> [BRANCH=<name>] and rebuild its WebAssembly guest (needs Docker).
+	@test -n "$(SHA)" || { echo "usage: make switchyard-update SHA=<commit> [BRANCH=<branch>]"; exit 1; }
+	hack/switchyard-update.sh update $(SHA) $(BRANCH)
+
+.PHONY: switchyard-verify
+switchyard-verify: ## Rebuild the Switchyard guest from the pinned commit and compare it with the committed one (needs Docker).
+	hack/switchyard-update.sh verify
+
 .PHONY: verify-docker-deps
 verify-docker-deps: ## Fail if a Go Dockerfile's generated COPY lines are stale (run make docker-deps).
 	go run ./hack/gen-docker-copies -check

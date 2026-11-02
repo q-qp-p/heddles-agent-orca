@@ -12,6 +12,9 @@
 !pkg/**
 !go.mod
 !go.sum
+# Vendored Go modules that go.mod replaces with a local directory (Switchyard).
+!third_party
+!third_party/**
 **/*_test.go
 
 # React UI source (Dockerfile.ui-proxy Stage 1)

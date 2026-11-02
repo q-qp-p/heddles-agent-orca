@@ -123,6 +123,31 @@ A new Dockerfile that builds Go code gets the two marker lines where its `COPY` 
 and an entry in `targets` in `hack/gen-docker-copies/main.go`. `.dockerignore` stays an
 allowlist: a directory a Dockerfile needs must also be re-included there.
 
+### Switchyard Is Vendored, and Its WebAssembly Guest Is in Git LFS
+The model-router uses [NVIDIA NeMo Switchyard](https://github.com/NVIDIA-NeMo/Switchyard)'s
+routing algorithms. Its Go binding is not published as a module yet, so it is vendored in
+`third_party/switchyard` (a `replace` in `go.mod`), pinned to one upstream commit recorded in
+`third_party/switchyard/UPSTREAM`. The binding runs Switchyard's Rust core as a WebAssembly
+guest in-process (wazero), so builds need no cgo and no Rust.
+
+The guest, `third_party/switchyard/bindings/go/internal/wasm/switchyard.wasm` (7 MB), is stored
+in **Git LFS**. Install [git-lfs](https://git-lfs.com) once (`git lfs install`) before cloning,
+or run `git lfs pull` in an existing clone. Without it the file is a text pointer; the
+Switchyard tests then fail with exactly that instruction. CI fetches it through
+`.github/actions/lfs-pull`, which caches it by checksum.
+
+```
+make switchyard-update SHA=<40 character commit> BRANCH=<branch>   # vendor a new commit
+make switchyard-verify                                             # rebuild and compare
+```
+
+Both need Docker, not a local Rust toolchain: the guest is built by upstream's own
+`scripts/build-go-wasm.sh` inside a digest-pinned Rust image (`rust:1.99.1-bookworm`, linux/amd64),
+so the bytes do not depend on the machine. `switchyard-verify` also runs weekly and on any change
+to the vendored files (`.github/workflows/switchyard-wasm.yml`). Upstream is fetched from
+codeload, not `gh api`, which NVIDIA's SAML blocks. After an update, commit the new guest through
+LFS, run `make docker-deps`, and check the guest benchmarks (`go test -bench . ./internal/router/switchyard`).
+
 ## After Making Changes
 
 **After editing `*_types.go` or markers:**

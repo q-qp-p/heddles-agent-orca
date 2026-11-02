@@ -1,0 +1,26 @@
+name: Pull Git LFS objects
+description: >
+  Replaces the Git LFS pointers in the checkout with their files (today: the
+  Switchyard WebAssembly guest). Objects are cached under .git/lfs, keyed by the
+  guest's checksum, so a run only downloads them when the guest changes and
+  does not spend GitHub's LFS bandwidth quota. Run it after actions/checkout.
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the Git LFS cache
+      uses: actions/cache@v6
+      with:
+        path: .git/lfs
+        key: git-lfs-${{ hashFiles('.gitattributes', 'third_party/switchyard/SWITCHYARD_WASM.sha256') }}
+
+    - name: Fetch Git LFS objects
+      shell: bash
+      run: |
+        git lfs install --local
+        git lfs pull
+        # Fail here, not deep inside a build, if a pointer is still a pointer.
+        if grep -rqs "^version https://git-lfs.github.com/spec/" third_party/switchyard/bindings/go/internal/wasm; then
+          echo "::error::the Switchyard guest is still a Git LFS pointer after git lfs pull"
+          exit 1
+        fi

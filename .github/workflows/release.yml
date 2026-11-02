@@ -63,6 +63,9 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
+      # The router and operator images embed the Switchyard guest, which is in LFS.
+      - uses: ./.github/actions/lfs-pull
+
       # Go and node stages run on the build platform and cross-compile
       # (FROM --platform=$BUILDPLATFORM); QEMU is only needed for the
       # final-stage layers of the arm64 image.

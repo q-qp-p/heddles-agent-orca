@@ -15,7 +15,8 @@ limitations under the License.
 */
 
 // Command gen-docker-copies keeps each Go Dockerfile's source COPY lines equal to
-// the packages its binary actually imports.
+// the packages its binary actually imports, and makes the modules go.mod replaces
+// with local directories resolvable before "go mod download".
 //
 // A Dockerfile that copies all of internal/ rebuilds (and, under skaffold, is
 // rebuilt) whenever any package in it changes, however unrelated. This command
@@ -23,6 +24,12 @@ limitations under the License.
 // rewrites the block between the "BEGIN generated go-deps" and "END generated
 // go-deps" markers of each Dockerfile, so an image changes only when its own
 // code does.
+//
+// A local "replace" (the vendored Switchyard binding) must have its go.mod in the
+// image before "go mod download" runs, in every image, even those that never
+// import it. A second block, "go-mod-replaces", carries just those go.mod and
+// go.sum files; the package sources of a replaced module are copied by go-deps
+// only into images that import them.
 //
 //	go run ./hack/gen-docker-copies          rewrite the blocks
 //	go run ./hack/gen-docker-copies -check   fail if any block is stale
@@ -32,6 +39,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -43,10 +51,14 @@ import (
 	"strings"
 )
 
+// Names of the generated blocks a Dockerfile can carry.
 const (
-	beginMarker = "# BEGIN generated go-deps"
-	endMarker   = "# END generated go-deps"
+	blockDeps     = "go-deps"
+	blockReplaces = "go-mod-replaces"
 )
+
+func beginMarker(block string) string { return "# BEGIN generated " + block }
+func endMarker(block string) string   { return "# END generated " + block }
 
 // target ties a Dockerfile to the main package it builds.
 type target struct {
@@ -97,13 +109,23 @@ func run(root string, targets []target, check bool) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the module path: %w", err)
 	}
-	all, err := repoPackages(root, strings.TrimSpace(module))
+	module = strings.TrimSpace(module)
+	replaces, err := localReplaces(root)
 	if err != nil {
 		return nil, err
 	}
+	modules := []string{module}
+	for _, r := range replaces {
+		modules = append(modules, r.Path)
+	}
+	all, err := repoPackages(root, modules)
+	if err != nil {
+		return nil, err
+	}
+	stubs := replaceStubLines(root, replaces)
 	var stale []string
 	for _, t := range targets {
-		lines, err := copyLines(root, strings.TrimSpace(module), all, t.Package)
+		lines, err := copyLines(root, module, all, t.Package)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", t.Dockerfile, err)
 		}
@@ -112,7 +134,11 @@ func run(root string, targets []target, check bool) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		updated, err := replaceBlock(string(old), lines)
+		updated, err := replaceBlock(string(old), blockDeps, lines)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", t.Dockerfile, err)
+		}
+		updated, err = replaceBlock(updated, blockReplaces, stubs)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", t.Dockerfile, err)
 		}
@@ -137,23 +163,29 @@ type pkgInfo struct {
 	Embed []string
 }
 
-// repoPackages lists every package of the module (broken ones included: the
-// ui-proxy embeds a directory that only exists after the UI build).
-func repoPackages(root, module string) (map[string]pkgInfo, error) {
+// repoPackages lists every package of the given modules: this one and any that
+// go.mod replaces with a local directory (broken ones included: the ui-proxy
+// embeds a directory that only exists after the UI build).
+func repoPackages(root string, modules []string) (map[string]pkgInfo, error) {
 	// go list reports resolved paths (on macOS /var is a symlink to /private/var),
 	// so relative paths are only right against a resolved root.
 	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return nil, err
 	}
-	out, err := goList(root, "-e", "-f", `{{.ImportPath}}|{{.Dir}}|{{join .EmbedFiles ","}}`, "./...")
+	patterns := []string{"./..."}
+	for _, m := range modules[1:] {
+		patterns = append(patterns, m+"/...")
+	}
+	args := append([]string{"-e", "-f", `{{.ImportPath}}|{{.Dir}}|{{join .EmbedFiles ","}}`}, patterns...)
+	out, err := goList(root, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing packages: %w", err)
 	}
 	pkgs := map[string]pkgInfo{}
 	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		parts := strings.SplitN(line, "|", 3)
-		if len(parts) != 3 || (parts[0] != module && !strings.HasPrefix(parts[0], module+"/")) {
+		if len(parts) != 3 || !inModules(parts[0], modules) {
 			continue
 		}
 		rel, err := filepath.Rel(root, parts[1])
@@ -167,6 +199,65 @@ func repoPackages(root, module string) (map[string]pkgInfo, error) {
 		pkgs[parts[0]] = info
 	}
 	return pkgs, nil
+}
+
+func inModules(importPath string, modules []string) bool {
+	for _, m := range modules {
+		if importPath == m || strings.HasPrefix(importPath, m+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// localReplace is a go.mod replace directive pointing at a directory of this
+// repository.
+type localReplace struct {
+	// Path is the replaced module's path.
+	Path string
+	// Dir is where it lives, relative to the repository root.
+	Dir string
+}
+
+// localReplaces reads the replace directives of go.mod that name a local directory.
+func localReplaces(root string) ([]localReplace, error) {
+	cmd := exec.Command("go", "mod", "edit", "-json")
+	cmd.Dir = root
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("go mod edit -json: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	var mod struct {
+		Replace []struct {
+			Old struct{ Path string }
+			New struct{ Path string }
+		}
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &mod); err != nil {
+		return nil, err
+	}
+	var out []localReplace
+	for _, r := range mod.Replace {
+		if strings.HasPrefix(r.New.Path, "./") {
+			out = append(out, localReplace{Path: r.Old.Path, Dir: path.Clean(r.New.Path)})
+		}
+	}
+	slices.SortFunc(out, func(a, b localReplace) int { return strings.Compare(a.Dir, b.Dir) })
+	return out, nil
+}
+
+// replaceStubLines returns the COPY lines that put each replaced module's go.mod
+// (and go.sum, when it has one) in an image ahead of "go mod download".
+func replaceStubLines(root string, replaces []localReplace) []string {
+	var lines []string
+	for _, r := range replaces {
+		lines = append(lines, fmt.Sprintf("COPY %s/go.mod %s/go.mod", r.Dir, r.Dir))
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(r.Dir), "go.sum")); err == nil {
+			lines = append(lines, fmt.Sprintf("COPY %s/go.sum %s/go.sum", r.Dir, r.Dir))
+		}
+	}
+	return lines
 }
 
 // copyLines returns the COPY lines that give pkg's build exactly the repository
@@ -238,12 +329,14 @@ func copyLines(root, module string, all map[string]pkgInfo, pkg string) ([]strin
 	return lines, nil
 }
 
-// replaceBlock swaps what lies between the markers of dockerfile for lines.
-func replaceBlock(dockerfile string, lines []string) (string, error) {
-	begin := strings.Index(dockerfile, beginMarker)
-	end := strings.Index(dockerfile, endMarker)
+// replaceBlock swaps what lies between the markers of the named block of
+// dockerfile for lines.
+func replaceBlock(dockerfile, block string, lines []string) (string, error) {
+	begin := strings.Index(dockerfile, beginMarker(block))
+	end := strings.Index(dockerfile, endMarker(block))
 	if begin < 0 || end < 0 || end < begin {
-		return "", errors.New("no \"" + beginMarker + "\" / \"" + endMarker + "\" markers; add them where the COPY lines go")
+		return "", errors.New("no \"" + beginMarker(block) + "\" / \"" + endMarker(block) +
+			"\" markers; add them where the COPY lines go")
 	}
 	beginEnd := begin + strings.Index(dockerfile[begin:], "\n") + 1
 	var b strings.Builder

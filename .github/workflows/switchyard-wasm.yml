@@ -1,0 +1,31 @@
+name: Switchyard Guest
+
+# The vendored Switchyard WebAssembly guest must be what its pinned upstream
+# commit builds to. This rebuilds it in the same digest-pinned Rust image the
+# update script uses and compares: on changes to the vendored files, and weekly in
+# case the base image or crates.io moved under the pin.
+on:
+  pull_request:
+    paths:
+      - 'third_party/switchyard/**'
+      - 'hack/switchyard-update.sh'
+      - '.gitattributes'
+      - '.github/workflows/switchyard-wasm.yml'
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Guest rebuilds to the committed binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v7
+
+      - name: Fetch Git LFS objects
+        uses: ./.github/actions/lfs-pull
+
+      - name: Rebuild and compare
+        run: make switchyard-verify

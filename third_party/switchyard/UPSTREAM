@@ -1,0 +1,7 @@
+repo=NVIDIA-NeMo/Switchyard
+branch=codex/go-backend-reporting
+sha=2000106e08dd13392f4a40ba7b9f995b7ecccb24
+tarball_sha256=ce65ae2971fe1fb87be390ad85b8d7f7e7f0213b7aeff13a6830cc88b873b6da
+rust_image=rust:1.99.1-bookworm@sha256:e9da6f6c3ed5095fd5d33bf7cdf309830a178a8147888f1b2f76d5769bd9306c
+rust_toolchain=1.99.1
+wasm_sha256=f6e4bedc7a0bae6b3bf3aa23f264fb5ca952b6add116fb224f4474bde39c041a

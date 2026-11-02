@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Switchyard routing binding, vendored** — NVIDIA NeMo Switchyard's Go binding is vendored in
+  `third_party/switchyard`, pinned to one upstream commit, with its WebAssembly guest built by
+  upstream's script in a digest-pinned Rust image and stored in **Git LFS** (install git-lfs to
+  clone; CI caches the object). It runs in-process through wazero, so images stay cgo-free and
+  need no Rust. Nothing routes with it yet. `make switchyard-update` / `make switchyard-verify`
+  (also a weekly and path-triggered workflow) vendor and check it. A local `go.mod` replace now
+  also gets its `go.mod` into every image before `go mod download`
+  (`go-mod-replaces` block, generated like the dependency one). See `docs/development.md`.
 - **Routing decision identity and a `Selector` seam** — every routing decision now carries a
   decision ID (UUIDv7), the rule or meta-router path that made it, and the task stage
   (`tool-exec`, `code`, `summarize`, `chat`). They appear in the `routing` trace event and in

@@ -6,6 +6,11 @@ ARG TARGETARCH
 WORKDIR /workspace
 # Copy the Go Modules manifests
 COPY go.mod go.sum ./
+# A go.mod replace to a local directory needs that directory's go.mod before the download.
+# BEGIN generated go-mod-replaces (hack/gen-docker-copies; run `make docker-deps`, do not edit)
+COPY third_party/switchyard/bindings/go/go.mod third_party/switchyard/bindings/go/go.mod
+COPY third_party/switchyard/bindings/go/go.sum third_party/switchyard/bindings/go/go.sum
+# END generated go-mod-replaces
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
 RUN go mod download
@@ -29,7 +34,7 @@ COPY internal/podbuilder/ internal/podbuilder/
 COPY internal/postgresql/ internal/postgresql/
 COPY internal/rag/*.go internal/rag/
 COPY internal/ratelimit/ internal/ratelimit/
-COPY internal/router/ internal/router/
+COPY internal/router/*.go internal/router/
 COPY internal/security/ internal/security/
 COPY internal/state/ internal/state/
 COPY internal/webhook/ internal/webhook/
