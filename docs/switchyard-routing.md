@@ -249,3 +249,13 @@ Approvers decide in the approvals view, like any other approval (kinds `routing`
 **Rolling back.** `spec.action: rollback` on an applied recommendation raises its own approval. If the selector was changed again since, the rollback is refused and `status.conditions` (`RollbackBlocked`) gives the patch to apply by hand, since restoring would also undo that change. A rejected rollback leaves the change in place and is not asked for again.
 
 **Checked afterwards.** A change that sent a kind of work to the cheaper model (`overspend`) is checked once a benchmark window has passed: the operator looks at the replayed pairs since the change, and `status.postApply.verdict` is `Confirmed`, `Regressed` (the capable model is clearly better again by more than the margin) or `Inconclusive`. A regression raises a rollback approval where applying is allowed; it never rolls back by itself. Other kinds of change are not checked (`NotAssessed`).
+
+### In the UI
+
+The **Routing** tab shows the same things without `kubectl`:
+
+- **Recommendations** lists open ones first. Each shows the evidence behind it, the patch (and the patch that undoes it, once applied), and buttons to copy the `kubectl patch` command or the patch as YAML. A threshold recommendation draws the cost against quality of every threshold the benchmark tried, marking the one in use and the one proposed; *Show as table* gives the same numbers.
+- **Ask for approval to apply** and **Ask for approval to undo** appear only where the operator would raise an approval (see above); otherwise the card says what is missing. They need a signed-in user, set `spec.action`, and change nothing until an approver agrees.
+- **Benchmarks** shows each benchmark's Agents, judge, sample rate, spend against its daily budget, and for each Agent and kind of work how often the answer served, the replayed answer, or neither won.
+- The **Approvals** inbox shows a routing approval's selector, what the evidence says, the patch in full, and what approving or rejecting does.
+

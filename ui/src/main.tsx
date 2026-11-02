@@ -14,6 +14,7 @@ import { CostDashboard } from './components/CostDashboard'
 import { SystemDashboard } from './components/SystemDashboard'
 import { MarketplaceView } from './components/MarketplaceView'
 import { ApprovalsView } from './components/ApprovalsView'
+import { RoutingInsightsView } from './components/RoutingInsightsView'
 import { applyDesignSystem, ds, toggleTheme, applyTheme, getPreferredTheme, type Theme } from './lib/designSystem'
 import { ICON, Icon } from './lib/icons'
 import type { IconComponent } from './lib/icons'
@@ -25,7 +26,7 @@ applyDesignSystem()
 // Apply the saved or system-default theme.
 applyTheme(getPreferredTheme())
 
-type TopLevelTab = ResourceTab | 'home' | 'marketplace' | 'history' | 'status' | 'approvals'
+type TopLevelTab = ResourceTab | 'home' | 'marketplace' | 'history' | 'status' | 'approvals' | 'routing'
 
 // ── Navigation state persistence (survives page refresh) ────────────────────
 //
@@ -61,7 +62,7 @@ function saveNavState(state: Partial<NavState>): void {
 
 // Validate the saved tab — ignore stale tabs from a previous deployment.
 const VALID_TABS: TopLevelTab[] = [
-  'home', 'marketplace', 'history', 'status', 'approvals', 'runs', 'deployments', 'workflows',
+  'home', 'marketplace', 'history', 'status', 'approvals', 'routing', 'runs', 'deployments', 'workflows',
   'agents', 'tools', 'mcpservers', 'modelproviders', 'knowledgebases', 'modelselectors',
 ]
 
@@ -181,7 +182,7 @@ const HOME_TABS: { key: 'home' | 'marketplace'; label: string }[] = [
 ]
 
 // Dashboard-style tabs that don't use the sidebar navigation.
-const DASHBOARD_TABS: TopLevelTab[] = ['history', 'status', 'approvals']
+const DASHBOARD_TABS: TopLevelTab[] = ['history', 'status', 'approvals', 'routing']
 
 /** Polls the number of pending approvals for the nav badge. 0 when approvals are off. */
 function usePendingApprovalCount(): number {
@@ -337,6 +338,14 @@ function App() {
             <Icon icon={ICON.approval} size={14} ariaHidden={true} /> Approvals
             {pendingApprovals > 0 && <span style={layout.navBadge}>{pendingApprovals}</span>}
           </button>
+          <button
+            style={{ ...layout.navTab, ...(tab === 'routing' && !showCosts ? layout.navTabActive : {}) }}
+            onClick={() => { setTab('routing'); setSelection(null); setBreadcrumbs([]); setShowCosts(false) }}
+            aria-label="Routing"
+            title="How models are chosen, and what to change"
+          >
+            <Icon icon={ICON.chart} size={14} ariaHidden={true} /> Routing
+          </button>
           <span style={layout.navDivider} />
           {OPS_TABS.map((t) => (
             <button
@@ -387,7 +396,7 @@ function App() {
       {/* ── Body ── */}
       <div style={layout.body}>
         {/* Left list panel - hidden on home/marketplace/history/status tabs */}
-        {tab !== 'home' && tab !== 'marketplace' && tab !== 'history' && tab !== 'status' && tab !== 'approvals' && (
+        {tab !== 'home' && tab !== 'marketplace' && tab !== 'history' && tab !== 'status' && tab !== 'approvals' && tab !== 'routing' && (
           <aside data-sidebar style={layout.leftPanel}>
             <div style={layout.listHeader}>
               <span style={layout.listTitle}>{TAB_LABELS[tab as ResourceTab]}</span>
@@ -458,6 +467,8 @@ function App() {
                 setSelection({ kind: 'run', name: runName, namespace: ns })
               }}
             />
+          ) : tab === 'routing' ? (
+            <RoutingInsightsView />
           ) : tab === 'status' ? (
             <SystemStatusPage navigateToTab={(t) => { setTab(t as TopLevelTab); setSelection(null); setBreadcrumbs([]); setShowCosts(false) }} />
           ) : selection?.kind === 'run' ? (

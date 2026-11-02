@@ -161,3 +161,73 @@ describe('formatRelative', () => {
     expect(formatRelative('2026-10-23T14:00:00Z', now)).toBe('in 2h')
   })
 })
+
+describe('ApprovalsView routing approvals', () => {
+  beforeEach(() => {
+    mockList.mockReset()
+    mockDecide.mockReset()
+  })
+
+  const routing = (over: Partial<Approval> = {}): Approval =>
+    pending({
+      kind: 'routing',
+      runName: '',
+      summary: 'Apply routing change for adaptive: weak answers as well',
+      details: {
+        selector: 'adaptive',
+        category: 'stage:chat',
+        summary: 'weak answers as well as strong in 100 judged pairs',
+        patch: { spec: { capabilityRouting: { 'stage:chat': 'weak' } } },
+        evidence: { projectedMonthlySavingsUsd: 11.57 },
+        caveat: 'a stage_router escalates when tool calls fail',
+      },
+      ...over,
+    })
+
+  it('shows what will change, what the evidence says and what happens either way', async () => {
+    mockList.mockResolvedValue([routing()])
+    render(<ApprovalsView />)
+    await screen.findByText('Apply routing change for adaptive: weak answers as well')
+    expect(screen.getByText('team-a/adaptive')).toBeInTheDocument()
+    expect(screen.getByText('stage:chat')).toBeInTheDocument()
+    expect(screen.getByText('weak answers as well as strong in 100 judged pairs')).toBeInTheDocument()
+    expect(screen.getByText('$11.57 a month')).toBeInTheDocument()
+    // The patch the approver is agreeing to is shown in full.
+    expect(screen.getByText(/"stage:chat": "weak"/)).toBeInTheDocument()
+    expect(screen.getByText(/the selector is changed now/)).toBeInTheDocument()
+    expect(screen.getByText('the selector is left as it is')).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent('a stage_router escalates when tool calls fail')
+  })
+
+  it('has no run to link to, only the namespace', async () => {
+    mockList.mockResolvedValue([routing()])
+    render(<ApprovalsView onNavigateToRun={vi.fn()} />)
+    await screen.findByText('Apply routing change for adaptive: weak answers as well')
+    expect(screen.queryByRole('button', { name: /team-a\// })).not.toBeInTheDocument()
+  })
+
+  it('describes an undo as putting the selector back', async () => {
+    mockList.mockResolvedValue([
+      routing({
+        kind: 'routing-rollback',
+        summary: 'Undo routing change for adaptive: weak answers as well',
+        details: { selector: 'adaptive', patch: { spec: { capabilityRouting: { 'stage:chat': null } } } },
+      }),
+    ])
+    render(<ApprovalsView />)
+    await screen.findByText('Undo routing change for adaptive: weak answers as well')
+    expect(screen.getByText('Undo with')).toBeInTheDocument()
+    expect(screen.getByText('the selector goes back to how it was before the change')).toBeInTheDocument()
+    expect(screen.queryByText(/the selector is changed now/)).not.toBeInTheDocument()
+  })
+
+  it('approves with the reason the approver typed', async () => {
+    mockList.mockResolvedValue([routing()])
+    mockDecide.mockResolvedValue({})
+    render(<ApprovalsView />)
+    await screen.findByText('Apply routing change for adaptive: weak answers as well')
+    await userEvent.type(screen.getByLabelText('Reason for the decision'), 'looks right')
+    await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    await waitFor(() => expect(mockDecide).toHaveBeenCalledWith('a1', 'approve', 'looks right'))
+  })
+})

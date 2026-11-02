@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A Routing tab in the UI** — lists the operator's routing recommendations with the evidence behind
+  each, the patch and how to undo it, and lets you copy a change as a `kubectl patch` command or as YAML.
+  Where a benchmark allows applying, it asks for an approval to apply a change or to undo one (nothing
+  changes until an approver agrees). A threshold recommendation draws the cost against quality of each
+  threshold the benchmark tried, with a table view. A second tab shows each RoutingBenchmark: its Agents,
+  spend against its daily budget, and who won per Agent and kind of work. The approvals inbox now shows
+  what a routing approval changes. New UI API endpoints: `GET /api/routing/recommendations`,
+  `GET /api/routing/benchmarks` and `POST /api/routing/recommendations/{ns}/{name}/action`.
 - **Applying a routing recommendation, with approval** — a `RoutingBenchmark` with `mode: proposeApply`
   and `approverGroups` now lets its Agents' selectors be changed by a recommendation once an approver
   agrees. The operator raises an approval for each recommendation that has a patch (or you ask with

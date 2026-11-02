@@ -153,6 +153,20 @@ function PendingCard({ approval: a, onDecided, onNavigateToRun }: {
           <Fact label="If approved" value={`cap rises by $${d.raiseByUSD} to $${d.newCapUSD}; the run resumes`} />
         )}
         {a.kind === 'budget' && <Fact label="If rejected" value="the run fails" />}
+        {isRouting(a) && d.selector && <Fact label="Selector" value={`${a.namespace}/${d.selector}`} mono />}
+        {isRouting(a) && d.category && <Fact label="Kind of work" value={d.category} mono />}
+        {isRouting(a) && d.summary && <Fact label="What the evidence shows" value={d.summary} wrap />}
+        {isRouting(a) && typeof d.evidence?.projectedMonthlySavingsUsd === 'number' && (
+          <Fact label="Projected saving" value={`$${d.evidence.projectedMonthlySavingsUsd.toFixed(2)} a month`} />
+        )}
+        {isRouting(a) && d.patch !== undefined && (
+          <Fact label={a.kind === 'routing' ? 'Change' : 'Undo with'} value={JSON.stringify(d.patch, null, 2)} mono wrap />
+        )}
+        {a.kind === 'routing' && (
+          <Fact label="If approved" value="the selector is changed now, and the settings it replaces are kept so the change can be undone" />
+        )}
+        {a.kind === 'routing-rollback' && <Fact label="If approved" value="the selector goes back to how it was before the change" />}
+        {isRouting(a) && <Fact label="If rejected" value="the selector is left as it is" />}
         {d.hosts && d.hosts.length > 0 && <Fact label="Destination" value={d.hosts.join(', ')} mono />}
         {d.binaries && d.binaries.length > 0 && <Fact label="Process" value={d.binaries.join(', ')} mono />}
         {d.rationale && <Fact label="Why" value={d.rationale} />}
@@ -162,6 +176,11 @@ function PendingCard({ approval: a, onDecided, onNavigateToRun }: {
         <Fact label="Approvers" value={a.approverGroups.length > 0 ? a.approverGroups.join(', ') : 'anyone with access to the namespace'} />
       </dl>
 
+      {isRouting(a) && d.caveat && (
+        <div style={s.securityNote} role="note">
+          <Icon icon={ICON.warning} size={14} ariaHidden /> {d.caveat}
+        </div>
+      )}
       {d.securityNotes && (
         <div style={s.securityNote} role="note">
           <Icon icon={ICON.warning} size={14} ariaHidden /> {d.securityNotes}
@@ -187,6 +206,11 @@ function PendingCard({ approval: a, onDecided, onNavigateToRun }: {
       {error && <div role="alert" style={s.cardError}>{error}</div>}
     </DSCard>
   )
+}
+
+/** A routing change, or the undoing of one: they belong to no run. */
+function isRouting(a: Approval): boolean {
+  return a.kind === 'routing' || a.kind === 'routing-rollback'
 }
 
 function DecidedRow({ approval: a, onNavigateToRun }: {
