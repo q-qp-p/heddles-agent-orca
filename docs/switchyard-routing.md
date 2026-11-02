@@ -192,4 +192,33 @@ Which call is sampled is decided from its decision ID, so the same call is alway
 
 Both AgentRuns and AgentDeployments are sampled. The judge's credentials are mounted on the pod even when the judge is not one of the selector's providers. A deployment's pods restart when its benchmark changes, as they do when its ModelSelector changes.
 
-The recommendations built from these results come later.
+The recommendations built from these results are described in the next section.
+
+## Routing recommendations
+
+The operator evaluates every ModelSelector every six hours (the benchmark's `evaluation.interval`, if one covers its Agents) and writes what it finds as `RoutingRecommendation` resources. **It never changes a selector.** A recommendation carries a summary, the evidence, a JSON merge patch against the selector, and the patch that undoes it.
+
+```bash
+kubectl get routingrecommendations
+kubectl get routingrecommendation <name> -o jsonpath='{.spec.summary}{"\n"}{.spec.patch}{"\n"}'
+# Apply it yourself, once you have read it:
+kubectl patch modelselector <selector> --type merge -p "$(kubectl get routingrecommendation <name> -o jsonpath='{.spec.patch}')"
+```
+
+It needs PostgreSQL. A selector opts out with the annotation `agentorca.io/routing-recommendations: disabled`; the operator flag `--routing-recommendations=false` turns it off everywhere.
+
+| Check | Needs | Fires when | Proposes |
+|---|---|---|---|
+| `deadProvider` | nothing but traffic | a provider failed most of at least 20 calls | removing it from the selector |
+| `overspend` | a benchmark | the cheaper model is within the non-inferiority margin for a kind of work, yet the dearer one still serves it | routing that stage to the cheaper model |
+| `underpowered` | a benchmark and `thresholds.maxUSDPerNetWin` | the dearer model is clearly better at a cost per extra judged win inside your limit | routing that stage to the dearer model |
+| `threshold` | a benchmark, on a composite selector | another `classifier.base_threshold` would cost less with no more bad routing, or avoid bad routing at an acceptable price | the new threshold |
+| `strategySwitch` | a benchmark, on a rule-based selector | its rules send hard calls to the capable model no more often than chance | a `stage_router` between its two models |
+
+A group of calls needs `evaluation.minSamples` judged pairs before anything is reported, and is ignored if the judge disagreed with itself on most of them. Ratings agree with a finding but never cause one.
+
+**Routes by kind of work.** `overspend` and `underpowered` write a `capabilityRouting` key `stage:<name>`, which the rule router now honours: calls at that stage (`tool-exec`, `code`, `summarize`, `chat`) go to the named provider. It applies after the vision, context, budget and timeout rules and before keyword hints. A switchyard selector decides by its algorithm and ignores stage routes, so a finding about one is report-only and says so.
+
+**Shared selectors.** If other Agents use the same selector, a change is proposed only when every one of them has enough judged pairs and the same finding. Otherwise the recommendation has no patch and its `spec.reason` names the Agents holding it back. Give an Agent its own selector to tune it separately.
+
+**Reading a recommendation.** `spec` is what the operator proposed and cannot be edited, except `action`. `status.phase` is `Proposed`, or `Expired` once the evidence no longer supports it, or `Superseded` by a newer finding of the same kind. `status.evidence` is refreshed on every evaluation. A `strategySwitch` carries a caveat: replayed samples cannot show how a `stage_router` would behave.

@@ -47,6 +47,9 @@ rules:
       - routingbenchmarks
       - routingbenchmarks/status
       - routingbenchmarks/finalizers
+      - routingrecommendations
+      - routingrecommendations/status
+      - routingrecommendations/finalizers
       - tenantconfigs
       - tenantconfigs/status
       - tenantconfigs/finalizers

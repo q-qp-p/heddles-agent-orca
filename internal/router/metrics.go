@@ -214,6 +214,9 @@ func (m *Metrics) IncRoutingDecision(strategy, path, stage string) {
 	if strings.HasPrefix(path, pathCapability) {
 		path = strings.TrimSuffix(pathCapability, ":")
 	}
+	if strings.HasPrefix(path, pathStage) {
+		path = strings.TrimSuffix(pathStage, ":")
+	}
 	m.routingDecisions.WithLabelValues(strategy, path, stage).Inc()
 }
 

@@ -442,3 +442,78 @@ func TestReservedCapabilityKey(t *testing.T) {
 		}
 	}
 }
+
+// --- stage routes ----------------------------------------------------------
+
+// toolTurn is a conversation with a tool result in it, which classifies as the
+// tool-exec stage.
+func toolTurn() []Message {
+	return []Message{
+		{Role: "user", Content: "run the tests"},
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "1"}}},
+		{Role: "tool", ToolCallID: "1", Content: "ok"},
+	}
+}
+
+func TestRuleRouter_StageRouteSendsThatKindOfWorkToItsProvider(t *testing.T) {
+	rr := newTestRuleRouter(t, func(c *Config) {
+		c.CapabilityRouting["stage:tool-exec"] = providerBig
+	})
+	res := rr.Route(toolTurn(), 0, 0)
+	if res.ProviderName != providerBig || res.Path != pathStage+stageToolExec || res.Confidence != confStage {
+		t.Errorf("result = %+v, want big on rule:stage:tool-exec at %v", res, confStage)
+	}
+	// Other stages are untouched by that route.
+	if res := rr.Route(ruleUserTurn("hello there"), 0, 0); res.Path == pathStage+stageChat || res.Path == pathStage+stageToolExec {
+		t.Errorf("a chat turn took a tool-exec route: %+v", res)
+	}
+}
+
+func TestRuleRouter_StageRouteWorksForChatToo(t *testing.T) {
+	rr := newTestRuleRouter(t, func(c *Config) { c.CapabilityRouting["stage:chat"] = providerCheap })
+	res := rr.Route(ruleUserTurn("hello there"), 0, 0)
+	if res.ProviderName != providerCheap || res.Path != "rule:stage:chat" {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestRuleRouter_StageRouteIgnoredWhenItsProviderIsNotAvailable(t *testing.T) {
+	rr := newTestRuleRouter(t, func(c *Config) { c.CapabilityRouting["stage:tool-exec"] = "ghost" })
+	if res := rr.Route(toolTurn(), 0, 0); res.Path == pathStage+stageToolExec || res.ProviderName == "ghost" {
+		t.Errorf("a route to a provider the selector does not have was taken: %+v", res)
+	}
+}
+
+// The rules that protect a run outrank policy about the kind of work.
+func TestRuleRouter_CapacityAndBudgetRulesOutrankAStageRoute(t *testing.T) {
+	routed := func(c *Config) { c.CapabilityRouting["stage:chat"] = providerCheap }
+	vision := []Message{{Role: "user", Content: []any{map[string]any{
+		"type": "image_url", "image_url": map[string]string{"url": "data:image/png;base64,iVBORw0KGgo="},
+	}}}}
+	rr := newTestRuleRouter(t, routed)
+	if res := rr.Route(vision, 0, 0); res.Path != pathVision {
+		t.Errorf("vision content: path = %q, want %q", res.Path, pathVision)
+	}
+	low := newTestRuleRouter(t, routed, func(c *Config) { c.BudgetPerRunUSD = 1 })
+	low.UpdateSpend(0.95)
+	if res := low.Route(ruleUserTurn("hello"), 0, 0); res.Path != pathBudget {
+		t.Errorf("low budget: path = %q, want %q", res.Path, pathBudget)
+	}
+}
+
+func TestRuleRouter_StageRouteOutranksAKeywordHint(t *testing.T) {
+	rr := newTestRuleRouter(t, func(c *Config) {
+		c.CapabilityRouting["code"] = providerBig
+		c.CapabilityRouting["stage:chat"] = providerCheap
+	})
+	if res := rr.Route(ruleUserTurn("please implement a function to do X"), 0, 0); res.ProviderName != providerCheap {
+		t.Errorf("result = %+v, want the stage route", res)
+	}
+}
+
+func TestExplainDecision_StageRoute(t *testing.T) {
+	got := explainDecision(Selection{Path: pathStage + "tool-exec", Category: Category{Stage: "tool-exec"}}, providerBig, "")
+	if want := `Chose big: this selector sends "tool-exec" work to it (stage tool-exec)`; got != want {
+		t.Errorf("reason = %q, want %q", got, want)
+	}
+}

@@ -82,6 +82,7 @@ func main() {
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
+	var routingRecommendations bool
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
@@ -92,6 +93,9 @@ func main() {
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.BoolVar(&routingRecommendations, "routing-recommendations", true,
+		"Evaluate every ModelSelector's routing and write RoutingRecommendations (report only). "+
+			"A selector opts out with the annotation agentorca.io/routing-recommendations=disabled.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -407,6 +411,16 @@ func main() {
 	}
 	if err := benchmarks.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "RoutingBenchmark")
+		os.Exit(1)
+	}
+	evaluation := &controller.RoutingEvaluationReconciler{
+		Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Disabled: !routingRecommendations,
+	}
+	if pgStore != nil {
+		evaluation.Source = pgStore
+	}
+	if err := evaluation.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "RoutingEvaluation")
 		os.Exit(1)
 	}
 	if err := (&controller.ToolReconciler{

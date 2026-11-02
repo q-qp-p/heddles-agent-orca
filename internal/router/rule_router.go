@@ -46,6 +46,7 @@ const (
 	pathContext     = "rule:context"
 	pathBudget      = "rule:budget"
 	pathTimeout     = "rule:timeout"
+	pathStage       = "rule:stage:"
 	pathCapability  = "rule:capability:"
 	pathWeighted    = "rule:weighted"
 )
@@ -57,10 +58,13 @@ const reasonWeightedRandom = "weighted random"
 // Rule confidences. They are hand-assigned, not calibrated; their only
 // consumer is the hybrid threshold comparison (Config.MetaRouterThreshold).
 const (
-	confVision     = 0.95
-	confContext    = 0.90
-	confBudget     = 0.85
-	confTimeout    = 0.80
+	confVision  = 0.95
+	confContext = 0.90
+	confBudget  = 0.85
+	confTimeout = 0.80
+	// confStage is the confidence of a stage route: it is policy the operator
+	// set (or approved), so the meta-router does not second-guess it.
+	confStage      = 0.90
 	confCapability = 0.75
 	confWeighted   = 0.50
 )
@@ -78,6 +82,9 @@ const (
 	urgentTimeoutFraction = 0.70
 )
 
+// stageKey starts the capabilityRouting keys that route one task stage.
+const stageKey = "stage:"
+
 // reservedCapabilityKey reports whether a CapabilityRouting key names a role
 // or stage rather than a keyword hint. Reserved keys are consumed by other
 // selectors and must never be keyword-matched against message text.
@@ -86,7 +93,7 @@ func reservedCapabilityKey(key string) bool {
 	case "capable", "efficient", "judge", "any":
 		return true
 	}
-	return strings.HasPrefix(key, "stage:") || strings.HasPrefix(key, "subagent.")
+	return strings.HasPrefix(key, stageKey) || strings.HasPrefix(key, "subagent.")
 }
 
 // RuleRouter selects a model provider using deterministic rules.
@@ -112,6 +119,8 @@ func NewRuleRouter(cfg *Config) *RuleRouter {
 //  2. Context length: estimated tokens > 80% of model context window → long-context model
 //  3. Budget: remaining budget < 20% → cheapest model
 //  4. Timeout proximity: elapsed > 70% of run timeout → fastest model
+//     4b. Stage route: a capabilityRouting key "stage:<stage>" names the provider
+//     for this kind of work (tool-exec, code, summarize, chat)
 //  5. Capability routing map: check configured tag hints
 //  6. Default: weighted random selection
 //
@@ -177,6 +186,20 @@ func (r *RuleRouter) routeInner(candidates []ProviderConfig, messages []Message,
 		if total > 0 && elapsed/total > urgentTimeoutFraction {
 			if p := findFastest(pool); p != nil {
 				return RouteResult{ProviderName: p.Name, Confidence: confTimeout, Reason: "approaching timeout", Path: pathTimeout}
+			}
+		}
+	}
+
+	// Rule 4b: Stage route — the selector sends this kind of work to one
+	// provider. It comes after the capacity and budget rules, which protect the
+	// run, and before keyword hints, which are guesses from the text.
+	if stage := classifyStage(messages).stage; stage != "" {
+		if name := r.cfg.CapabilityRouting[stageKey+stage]; name != "" {
+			for i := range candidates {
+				if candidates[i].Name == name {
+					return RouteResult{ProviderName: name, Confidence: confStage,
+						Reason: "stage route: " + stage, Path: pathStage + stage}
+				}
 			}
 		}
 	}

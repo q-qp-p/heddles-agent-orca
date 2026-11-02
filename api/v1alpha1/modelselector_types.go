@@ -135,6 +135,16 @@ type ModelSelectorStatus struct {
 	// +optional
 	ActiveProviders []string `json:"activeProviders,omitempty"`
 
+	// BenchmarkRef names the RoutingBenchmark that covers the Agents using this
+	// selector, if one does.
+	// +optional
+	BenchmarkRef string `json:"benchmarkRef,omitempty"`
+
+	// OpenRecommendations counts the RoutingRecommendations for this selector
+	// that nobody has applied or dismissed.
+	// +optional
+	OpenRecommendations int32 `json:"openRecommendations,omitempty"`
+
 	// Conditions holds standard Kubernetes conditions:
 	// - ProvidersResolved: every provider the spec names exists in the namespace
 	// - SwitchyardValid:   the Switchyard algorithm is served and accepted (strategy switchyard)

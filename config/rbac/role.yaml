@@ -67,6 +67,7 @@ rules:
   - modelproviders
   - modelselectors
   - routingbenchmarks
+  - routingrecommendations
   - tenantconfigs
   - tools
   verbs:
@@ -89,6 +90,7 @@ rules:
   - modelproviders/finalizers
   - modelselectors/finalizers
   - routingbenchmarks/finalizers
+  - routingrecommendations/finalizers
   - tenantconfigs/finalizers
   - tools/finalizers
   verbs:
@@ -105,6 +107,7 @@ rules:
   - modelproviders/status
   - modelselectors/status
   - routingbenchmarks/status
+  - routingrecommendations/status
   - tenantconfigs/status
   - tools/status
   verbs:

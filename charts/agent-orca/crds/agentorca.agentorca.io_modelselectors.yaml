@@ -178,6 +178,11 @@ spec:
                 items:
                   type: string
                 type: array
+              benchmarkRef:
+                description: |-
+                  BenchmarkRef names the RoutingBenchmark that covers the Agents using this
+                  selector, if one does.
+                type: string
               conditions:
                 description: |-
                   Conditions holds standard Kubernetes conditions:
@@ -246,6 +251,12 @@ spec:
                 description: ObservedGeneration is the spec generation the conditions
                   describe.
                 format: int64
+                type: integer
+              openRecommendations:
+                description: |-
+                  OpenRecommendations counts the RoutingRecommendations for this selector
+                  that nobody has applied or dismissed.
+                format: int32
                 type: integer
             type: object
         type: object

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Routing recommendations** — the operator now looks at how each ModelSelector has been routing and
+  writes what it finds as `RoutingRecommendation` resources: a summary, the numbers behind it, a JSON
+  merge patch against the selector and the patch that undoes it. It never changes a selector itself.
+  Without any setup it reports providers that fail most calls. With a `RoutingBenchmark` covering the
+  Agents, it also reports a model that is not worth its price for a kind of work, one that is too weak
+  for it, a better `base_threshold` for a composite selector, and a rule-based selector that routes no
+  better than chance. A change to a selector several Agents share is held back, with the reason, until
+  every one of them has enough evidence. Read them with `kubectl get routingrecommendations`; turn them
+  off for a selector with the annotation `agentorca.io/routing-recommendations: disabled`, or for the
+  operator with `--routing-recommendations=false`. It needs PostgreSQL.
 - **RoutingBenchmark** — a new resource that measures how well routing serves a set of Agents, chosen by
   `agentRefs` or an `agentSelector`. Evidence is kept per Agent, whether its work runs as an AgentRun, an
   AgentDeployment or a workflow step, so it builds up across runs. The operator validates the benchmark,
@@ -199,6 +209,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AOCTL_ENDPOINT` at a remote cluster.
 
 ### Changed
+
+- **A `stage:<name>` route in `capabilityRouting` now takes effect.** The rule router sends calls of
+  that stage (`tool-exec`, `code`, `summarize` or `chat`) to the named provider. It applies after the
+  vision, context, budget and timeout rules, which still win, and before keyword hints. Until now such
+  keys were reserved and ignored. A selector that has none behaves as before.
 
 - **Go images copy only the packages their binary imports** — the `COPY cmd/ internal/ api/`
   lines of the Go Dockerfiles are now generated from `go list -deps` by

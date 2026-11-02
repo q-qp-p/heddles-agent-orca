@@ -459,7 +459,10 @@ func TestMetrics_CapabilityPathDoesNotMintSeries(t *testing.T) {
 	for _, k := range []string{"code", "reasoning", "my-custom-key"} {
 		m.IncRoutingDecision("hybrid", pathCapability+k, "chat")
 	}
-	if n := testutil.CollectAndCount(m.routingDecisions); n != 1 {
-		t.Errorf("series = %d, want 1: operator-chosen capability keys must not become labels", n)
+	for _, k := range []string{"chat", "tool-exec", "whatever-an-operator-types"} {
+		m.IncRoutingDecision("hybrid", pathStage+k, "chat")
+	}
+	if n := testutil.CollectAndCount(m.routingDecisions); n != 2 {
+		t.Errorf("series = %d, want 2 (one for capability paths, one for stage paths): operator-chosen keys must not become labels", n)
 	}
 }

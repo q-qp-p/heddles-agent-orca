@@ -83,6 +83,8 @@ func explainRule(sel Selection, chosen string) string {
 		return fmt.Sprintf("Chose %s: less than 20%% of the run budget is left", chosen)
 	case sel.Path == pathTimeout:
 		return fmt.Sprintf("Chose %s: the run is close to its time limit", chosen)
+	case strings.HasPrefix(sel.Path, pathStage):
+		return fmt.Sprintf("Chose %s: this selector sends %q work to it", chosen, strings.TrimPrefix(sel.Path, pathStage))
 	case strings.HasPrefix(sel.Path, pathCapability):
 		return fmt.Sprintf("Chose %s: the task matches the %q capability", chosen, strings.TrimPrefix(sel.Path, pathCapability))
 	case sel.Path == pathWeighted:
