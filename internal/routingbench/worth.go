@@ -46,6 +46,13 @@ type Sample struct {
 	// own cost is not part of the comparison.
 	ServedCostUSD float64
 	ShadowCostUSD float64
+
+	// Algorithm is the Switchyard algorithm that routed the served call, empty
+	// for the rule router, and Confidence its score for that call. For a
+	// composite selector the score is the judge's p_solve: how likely the cheaper
+	// model is to solve the task.
+	Algorithm  string
+	Confidence float64
 }
 
 // Tiers says which of two models is the capable (dearer) one. When the selector
@@ -92,7 +99,9 @@ const (
 
 // Pair is a Sample oriented by tier.
 type Pair struct {
-	Result Result
+	// Confidence is the routing score of the served call, for the threshold sweep.
+	Confidence float64
+	Result     Result
 	// RoutedCapable is true when the capable model served the call.
 	RoutedCapable bool
 	// CapableCostUSD and EfficientCostUSD are what each tier's answer cost.
@@ -119,11 +128,19 @@ type Group struct {
 	WindowDays float64
 }
 
-// Aggregate orients samples and groups them by Agent, category and model pair,
-// in a stable order. Samples whose models cannot be told apart, or whose
-// verdict is not served, shadow or tie, are skipped.
-func Aggregate(samples []Sample, tiers func(agent string) Tiers) []Group {
-	idx := map[GroupKey]*Group{}
+// Call is a Sample oriented by tier, with where it came from.
+type Call struct {
+	GroupKey
+	Pair
+	// Algorithm is the Switchyard algorithm that routed the served call.
+	Algorithm string
+}
+
+// Orient turns samples into oriented calls, in input order. Samples whose
+// models cannot be told apart, or whose verdict is not served, shadow or tie,
+// are skipped.
+func Orient(samples []Sample, tiers func(agent string) Tiers) []Call {
+	out := make([]Call, 0, len(samples))
 	for _, s := range samples {
 		capable, efficient, ok := tiers(s.Agent).orient(s.ServedProvider, s.ShadowProvider)
 		if !ok {
@@ -144,19 +161,32 @@ func Aggregate(samples []Sample, tiers func(agent string) Tiers) []Group {
 		default:
 			continue
 		}
-		p := Pair{Result: res, RoutedCapable: servedCapable, Inconsistent: s.Inconsistent}
+		p := Pair{Result: res, RoutedCapable: servedCapable, Inconsistent: s.Inconsistent, Confidence: s.Confidence}
 		if servedCapable {
 			p.CapableCostUSD, p.EfficientCostUSD = s.ServedCostUSD, s.ShadowCostUSD
 		} else {
 			p.CapableCostUSD, p.EfficientCostUSD = s.ShadowCostUSD, s.ServedCostUSD
 		}
-		key := GroupKey{Agent: s.Agent, Category: s.Category, Capable: capable, Efficient: efficient}
-		g := idx[key]
+		out = append(out, Call{
+			GroupKey:  GroupKey{Agent: s.Agent, Category: s.Category, Capable: capable, Efficient: efficient},
+			Pair:      p,
+			Algorithm: s.Algorithm,
+		})
+	}
+	return out
+}
+
+// Aggregate orients samples and groups them by Agent, category and model pair,
+// in a stable order.
+func Aggregate(samples []Sample, tiers func(agent string) Tiers) []Group {
+	idx := map[GroupKey]*Group{}
+	for _, c := range Orient(samples, tiers) {
+		g := idx[c.GroupKey]
 		if g == nil {
-			g = &Group{GroupKey: key}
-			idx[key] = g
+			g = &Group{GroupKey: c.GroupKey}
+			idx[c.GroupKey] = g
 		}
-		g.Pairs = append(g.Pairs, p)
+		g.Pairs = append(g.Pairs, c.Pair)
 	}
 	out := make([]Group, 0, len(idx))
 	for _, g := range idx {
@@ -292,6 +322,9 @@ type Options struct {
 	// Defaults 0.5 and 20.
 	DeadProviderErrorRate float64
 	MinProviderCalls      int
+	// MinRoutingLift is the least routing lift that counts as routing better than
+	// chance; below it a rule-based selector is proposed a stage_router. Default 0.1.
+	MinRoutingLift float64
 }
 
 func (o Options) withDefaults() Options {
@@ -318,6 +351,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.MinProviderCalls <= 0 {
 		o.MinProviderCalls = 20
+	}
+	if o.MinRoutingLift <= 0 {
+		o.MinRoutingLift = 0.1
 	}
 	return o
 }

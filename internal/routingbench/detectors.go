@@ -48,6 +48,9 @@ type Ratings struct{ Up, Down int }
 // Input is everything the detectors read.
 type Input struct {
 	Groups []Group
+	// Calls are the same samples one by one, for the detectors that sweep a
+	// setting across them. Optional.
+	Calls []Call
 	// Selectors are the selectors in play, by name; AgentSelector says which
 	// one each Agent routes through.
 	Selectors     map[string]Selector
@@ -74,6 +77,21 @@ type Evidence struct {
 	// ErrorRate and Calls back a deadProvider finding.
 	ErrorRate float64 `json:"errorRate,omitempty"`
 	Calls     int     `json:"calls,omitempty"`
+
+	// FromThreshold and ToThreshold, LossChange and LossChangeHi back a
+	// threshold finding. LossChange is the change in the share of calls routed
+	// to the model whose answer lost; LossChangeHi its upper bound. Frontier is
+	// every threshold not beaten on both cost and loss.
+	FromThreshold float64         `json:"fromThreshold,omitempty"`
+	ToThreshold   float64         `json:"toThreshold,omitempty"`
+	LossChange    float64         `json:"lossChange,omitempty"`
+	LossChangeHi  float64         `json:"lossChangeHi,omitempty"`
+	Frontier      []FrontierPoint `json:"frontier,omitempty"`
+
+	// RoutingLift backs a strategySwitch finding: how much more often the capable
+	// model's answer wins on calls routed to it than on calls routed away.
+	RoutingLift   *float64 `json:"routingLift,omitempty"`
+	RoutingLiftHi float64  `json:"routingLiftHi,omitempty"`
 }
 
 // Finding is something the evidence supports. When Patch is nil the finding is
@@ -88,6 +106,8 @@ type Finding struct {
 	Action   *Action
 	Patch    *Patch
 	Reason   string
+	// Caveat is something a person should weigh even though the finding has a patch.
+	Caveat string
 	// Corroboration lists independent signals that agree with the finding.
 	Corroboration []string
 }
@@ -111,6 +131,8 @@ func Detect(in Input) []Finding {
 		}
 	}
 	out = append(out, deadProviders(in, o)...)
+	out = append(out, thresholdFindings(in, o)...)
+	out = append(out, strategySwitches(in, o)...)
 	out = settle(out, in, o)
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -231,7 +253,8 @@ func settle(fs []Finding, in Input, o Options) []Finding {
 		if f.Action == nil {
 			continue
 		}
-		if f.Action.Kind == ActionRemoveProvider {
+		if f.Selector != "" { // a finding about a selector, not about an Agent
+			f.Action.Selector = f.Selector
 			known[i] = true
 			continue
 		}
@@ -245,8 +268,8 @@ func settle(fs []Finding, in Input, o Options) []Finding {
 	}
 	for i := range fs {
 		f := &fs[i]
-		if f.Action == nil || !known[i] {
-			continue
+		if f.Action == nil || !known[i] || f.Reason != "" {
+			continue // report-only: a detector already said why
 		}
 		sel := in.Selectors[f.Action.Selector]
 		sel.Name = f.Action.Selector
@@ -260,7 +283,7 @@ func settle(fs []Finding, in Input, o Options) []Finding {
 			}
 			continue
 		}
-		if f.Detector != DetectorDeadProvider {
+		if f.Detector == DetectorOverspend || f.Detector == DetectorUnderpowered {
 			if why := disagreement(*f, fs, in, o); why != "" {
 				f.noPatch(why)
 				continue

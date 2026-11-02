@@ -26,10 +26,11 @@ import (
 )
 
 const (
-	strong = "strong"
-	weak   = "weak"
-	stageC = "stage:chat"
-	stageT = "stage:tool-exec"
+	selName = "sel"
+	strong  = "strong"
+	weak    = "weak"
+	stageC  = "stage:chat"
+	stageT  = "stage:tool-exec"
 )
 
 // tiers treats strong as the capable model and weak as the efficient one.
@@ -195,17 +196,17 @@ func TestEvaluateEmptyGroup(t *testing.T) {
 func input(g ...Group) Input {
 	return Input{
 		Groups: g,
-		Selectors: map[string]Selector{"sel": {
-			Name: "sel", Strategy: "rule-based",
+		Selectors: map[string]Selector{selName: {
+			Name: selName, Strategy: "rule-based",
 			Providers: []ProviderWeight{{Name: strong, Weight: 50}, {Name: weak, Weight: 50}},
 		}},
-		AgentSelector: map[string]string{"a": "sel"},
+		AgentSelector: map[string]string{"a": selName},
 	}
 }
 
 // shared puts Agent b on the same selector as Agent a.
 func shared(in Input) Input {
-	in.AgentSelector["b"] = "sel"
+	in.AgentSelector["b"] = selName
 	return in
 }
 
@@ -230,7 +231,7 @@ func TestOverspendFiresWhenTheCheaperModelIsAsGood(t *testing.T) {
 	if string(f.Patch.Rollback) != `{"spec":{"capabilityRouting":{"stage:chat":null}}}` {
 		t.Errorf("rollback = %s, want the route deleted again", f.Patch.Rollback)
 	}
-	if f.Selector != "sel" {
+	if f.Selector != selName {
 		t.Errorf("selector = %q", f.Selector)
 	}
 }
@@ -321,15 +322,15 @@ func TestRatingsCorroborateButNeverTrigger(t *testing.T) {
 
 func TestDeadProviderNeedsOnlyPassiveData(t *testing.T) {
 	in := input()
-	in.Selectors["sel"] = Selector{
-		Name: "sel", Strategy: "rule-based",
+	in.Selectors[selName] = Selector{
+		Name: selName, Strategy: "rule-based",
 		Providers:     []ProviderWeight{{Name: strong, Weight: 50}, {Name: weak, Weight: 50, RoutingHint: "cheap"}},
 		FallbackChain: []string{weak, "other"},
 	}
 	in.ProviderStats = []ProviderStat{
-		{Selector: "sel", Provider: weak, Calls: 40, Errors: 30},
-		{Selector: "sel", Provider: strong, Calls: 40, Errors: 2},
-		{Selector: "sel", Provider: "flaky", Calls: 5, Errors: 5}, // too few calls to judge
+		{Selector: selName, Provider: weak, Calls: 40, Errors: 30},
+		{Selector: selName, Provider: strong, Calls: 40, Errors: 2},
+		{Selector: selName, Provider: "flaky", Calls: 5, Errors: 5}, // too few calls to judge
 	}
 	fs := Detect(in)
 	if len(fs) != 1 || fs[0].Detector != DetectorDeadProvider || fs[0].Action.Provider != weak {
@@ -348,8 +349,8 @@ func TestDeadProviderNeedsOnlyPassiveData(t *testing.T) {
 
 func TestDeadProviderIsReportedButNotRemovedWhenItIsTheOnlyOne(t *testing.T) {
 	in := input()
-	in.Selectors["sel"] = Selector{Name: "sel", Strategy: "rule-based", Providers: []ProviderWeight{{Name: weak, Weight: 100}}}
-	in.ProviderStats = []ProviderStat{{Selector: "sel", Provider: weak, Calls: 40, Errors: 40}}
+	in.Selectors[selName] = Selector{Name: selName, Strategy: "rule-based", Providers: []ProviderWeight{{Name: weak, Weight: 100}}}
+	in.ProviderStats = []ProviderStat{{Selector: selName, Provider: weak, Calls: 40, Errors: 40}}
 	fs := Detect(in)
 	if len(fs) != 1 || fs[0].Patch != nil || !strings.Contains(fs[0].Reason, "nothing to route to") {
 		t.Errorf("findings = %+v, want a report-only finding that says why", fs)
@@ -359,7 +360,7 @@ func TestDeadProviderIsReportedButNotRemovedWhenItIsTheOnlyOne(t *testing.T) {
 // --- patches ---------------------------------------------------------------
 
 func TestBuildPatchRouteCategoryRollbackRestoresThePreviousRoute(t *testing.T) {
-	sel := Selector{Name: "sel", Strategy: "rule-based", Providers: []ProviderWeight{{Name: strong}, {Name: weak}},
+	sel := Selector{Name: selName, Strategy: "rule-based", Providers: []ProviderWeight{{Name: strong}, {Name: weak}},
 		CapabilityRouting: map[string]string{stageC: strong, "capable": strong}}
 	p, err := BuildPatch(sel, Action{Kind: ActionRouteCategory, Category: stageC, Provider: weak})
 	if err != nil {
@@ -375,14 +376,14 @@ func TestBuildPatchRouteCategoryRollbackRestoresThePreviousRoute(t *testing.T) {
 }
 
 func TestBuildPatchRefusesWhatItCannotDoSafely(t *testing.T) {
-	base := Selector{Name: "sel", Strategy: "rule-based", Providers: []ProviderWeight{{Name: strong, Weight: 1}, {Name: weak, Weight: 1}}}
+	base := Selector{Name: selName, Strategy: "rule-based", Providers: []ProviderWeight{{Name: strong, Weight: 1}, {Name: weak, Weight: 1}}}
 	cases := map[string]struct {
 		sel Selector
 		a   Action
 		why string
 	}{
 		"switchyard ignores stage routes": {
-			sel: Selector{Name: "sel", Strategy: "switchyard", Providers: base.Providers},
+			sel: Selector{Name: selName, Strategy: "switchyard", Providers: base.Providers},
 			a:   Action{Kind: ActionRouteCategory, Category: stageC, Provider: weak}, why: "switchyard",
 		},
 		"not a stage":      {base, Action{Kind: ActionRouteCategory, Category: "sy:override", Provider: weak}, "not a task stage"},
@@ -390,7 +391,7 @@ func TestBuildPatchRefusesWhatItCannotDoSafely(t *testing.T) {
 		"unknown provider": {base, Action{Kind: ActionRouteCategory, Category: stageC, Provider: "ghost"}, "not one of the selector"},
 		"remove unknown":   {base, Action{Kind: ActionRemoveProvider, Provider: "ghost"}, "not one of the selector"},
 		"route still points at it": {
-			Selector{Name: "sel", Strategy: "rule-based", Providers: base.Providers, CapabilityRouting: map[string]string{stageC: weak}},
+			Selector{Name: selName, Strategy: "rule-based", Providers: base.Providers, CapabilityRouting: map[string]string{stageC: weak}},
 			Action{Kind: ActionRemoveProvider, Provider: weak}, "still sends traffic",
 		},
 	}

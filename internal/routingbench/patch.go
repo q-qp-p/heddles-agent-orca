@@ -37,6 +37,8 @@ type Selector struct {
 	Providers         []ProviderWeight
 	FallbackChain     []string
 	CapabilityRouting map[string]string
+	// Switchyard is the decoded spec.switchyard, nil for other strategies.
+	Switchyard map[string]any
 }
 
 // strategySwitchyard is the strategy whose routing the stage keys do not steer.
@@ -54,6 +56,12 @@ const (
 	ActionRouteCategory ActionKind = "RouteCategory"
 	// ActionRemoveProvider takes a dead provider out of the selector.
 	ActionRemoveProvider ActionKind = "RemoveProvider"
+	// ActionSetThreshold moves the cut-off a composite selector's judge score
+	// is compared with (classifier.base_threshold).
+	ActionSetThreshold ActionKind = "SetThreshold"
+	// ActionSwitchStrategy moves a rule-based selector to a switchyard
+	// stage_router between its capable and efficient models.
+	ActionSwitchStrategy ActionKind = "SwitchStrategy"
 )
 
 // Action is a change to a ModelSelector.
@@ -64,6 +72,10 @@ type Action struct {
 	// remove (RemoveProvider uses Provider only).
 	Category string
 	Provider string
+	// Value is the new threshold for SetThreshold.
+	Value float64
+	// Capable and Efficient are the two models a SwitchStrategy routes between.
+	Capable, Efficient string
 }
 
 // Patch is an RFC 7386 merge patch against a ModelSelector, and the patch that
@@ -89,6 +101,10 @@ func BuildPatch(sel Selector, a Action) (Patch, error) {
 		return routeCategoryPatch(sel, a)
 	case ActionRemoveProvider:
 		return removeProviderPatch(sel, a)
+	case ActionSetThreshold:
+		return setThresholdPatch(sel, a)
+	case ActionSwitchStrategy:
+		return switchStrategyPatch(sel, a)
 	}
 	return Patch{}, fmt.Errorf("unknown action kind %q", a.Kind)
 }
@@ -150,4 +166,70 @@ func marshalPatch(forward, rollback any) (Patch, error) {
 		return Patch{}, err
 	}
 	return Patch{Forward: f, Rollback: r}, nil
+}
+
+// compositeBaseThreshold reads classifier.base_threshold of a composite spec.
+func compositeBaseThreshold(sw map[string]any) (float64, bool) {
+	if t, _ := sw["type"].(string); t != "composite" {
+		return 0, false
+	}
+	cl, _ := sw["classifier"].(map[string]any)
+	v, ok := cl["base_threshold"].(float64)
+	return v, ok
+}
+
+func setThresholdPatch(sel Selector, a Action) (Patch, error) {
+	if sel.Strategy != strategySwitchyard {
+		return Patch{}, &NoLeverError{"only a switchyard selector has a threshold"}
+	}
+	prev, ok := compositeBaseThreshold(sel.Switchyard)
+	if !ok {
+		return Patch{}, &NoLeverError{"only a composite selector with classifier.base_threshold has a threshold this can move"}
+	}
+	if !(a.Value > 0 && a.Value < 1) {
+		return Patch{}, &NoLeverError{fmt.Sprintf("threshold %v is outside (0, 1)", a.Value)}
+	}
+	set := func(v float64) map[string]any {
+		return map[string]any{"spec": map[string]any{"switchyard": map[string]any{"classifier": map[string]any{"base_threshold": v}}}}
+	}
+	return marshalPatch(set(a.Value), set(prev))
+}
+
+func switchStrategyPatch(sel Selector, a Action) (Patch, error) {
+	has := func(name string) bool {
+		return slices.ContainsFunc(sel.Providers, func(p ProviderWeight) bool { return p.Name == name })
+	}
+	switch {
+	case sel.Strategy == strategySwitchyard:
+		return Patch{}, &NoLeverError{"the selector already uses switchyard"}
+	case a.Capable == "" || a.Efficient == "" || a.Capable == a.Efficient:
+		return Patch{}, &NoLeverError{"a stage_router needs two different models"}
+	case !has(a.Capable) || !has(a.Efficient):
+		return Patch{}, &NoLeverError{"both models must be providers of the selector"}
+	}
+	forward := map[string]any{"spec": map[string]any{
+		"strategy":          strategySwitchyard,
+		"capabilityRouting": map[string]any{"capable": a.Capable, "efficient": a.Efficient},
+		"switchyard": map[string]any{
+			"type": "stage_router", "picker": "efficient_first",
+			"capable_target": a.Capable, "efficient_target": a.Efficient, "confidence_threshold": 0.5,
+		},
+	}}
+	// Setting a key to null removes it, which restores a selector that had none.
+	prevRole := func(role string) any {
+		if v, ok := sel.CapabilityRouting[role]; ok {
+			return v
+		}
+		return nil
+	}
+	var prevStrategy any
+	if sel.Strategy != "" {
+		prevStrategy = sel.Strategy
+	}
+	rollback := map[string]any{"spec": map[string]any{
+		"strategy":          prevStrategy,
+		"capabilityRouting": map[string]any{"capable": prevRole("capable"), "efficient": prevRole("efficient")},
+		"switchyard":        nil,
+	}}
+	return marshalPatch(forward, rollback)
 }
