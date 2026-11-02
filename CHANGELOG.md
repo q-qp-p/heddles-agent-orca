@@ -199,6 +199,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OpenAI gpt-6 models failed every tool call** — OpenAI answers HTTP 400 ("Function tools with
+  reasoning_effort are not supported ... use /v1/responses") when a request with tools reaches these
+  models on `/v1/chat/completions`, and `gpt-6.1-sol` cannot turn reasoning off. Every agent call
+  carries tools, so a selector made only of OpenAI models could not answer at all. The router now
+  switches a provider to the Responses API the first time OpenAI asks for it and remembers that for
+  the life of the router; the Responses stream is translated to chat-completion chunks, so nothing
+  downstream changes. Other 400s still fail over as before. No ModelProvider field is involved.
+  Reasoning items are not carried between turns, so the model reasons afresh on each call.
+
 - **Anthropic calls recorded zero prompt tokens** — the streaming translator read only the output
   count and dropped the input count Anthropic sends in `message_start`, so every Anthropic call
   showed `prompt_tokens = 0`. Cost, `routing_events` and the context-size accounting that depends on

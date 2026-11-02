@@ -380,7 +380,7 @@ func switchyardRequest(messages []Message) ([]byte, error) {
 		for _, tc := range m.ToolCalls {
 			typ := tc.Type
 			if typ == "" {
-				typ = "function"
+				typ = toolTypeFunction
 			}
 			out[i].ToolCalls = append(out[i].ToolCalls, switchyardToolCall{ID: tc.ID, Type: typ, Function: tc.Function})
 		}

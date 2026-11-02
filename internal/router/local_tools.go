@@ -232,7 +232,7 @@ func (r *Router) returnToolCallsToAgent(w http.ResponseWriter, flusher http.Flus
 	out := make([]ToolCall, len(calls))
 	for i, tc := range calls {
 		tc.Index = i
-		tc.Type = "function"
+		tc.Type = toolTypeFunction
 		out[i] = tc
 		if ev, err := json.Marshal(map[string]string{
 			"type":        "toolCall",

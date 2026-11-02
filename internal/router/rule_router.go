@@ -338,14 +338,14 @@ func hasImageContent(messages []Message) bool {
 		case []any:
 			for _, part := range v {
 				if partMap, ok := part.(map[string]any); ok {
-					if partMap["type"] == "image_url" {
+					if partMap["type"] == partTypeImageURL {
 						return true
 					}
 				}
 			}
 		case []map[string]any:
 			for _, part := range v {
-				if part["type"] == "image_url" {
+				if part["type"] == partTypeImageURL {
 					return true
 				}
 			}

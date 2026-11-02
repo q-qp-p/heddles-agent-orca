@@ -82,6 +82,7 @@ type Router struct {
 	messages          []Message       // the current turn: client input, assistant replies, tool results
 	turnPreamble      []Message       // injected context for the current turn, reused by its continuations; never stored
 	turnLocalTools    map[string]bool // agent-run tools the current turn's request declared (local_tools.go)
+	responsesOnly     sync.Map        // provider name → true once OpenAI asked for the Responses API (responses.go)
 	mu                sync.Mutex
 	spendUSD          float64
 	budgetCap         float64       // current spend cap; 0 until the operator reports one (see budget.go)

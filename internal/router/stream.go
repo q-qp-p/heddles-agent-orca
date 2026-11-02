@@ -161,6 +161,10 @@ func (r *Router) forwardToProviderStream(ctx context.Context, provider *Provider
 	chatReq.Messages = adaptToolCallsForProvider(provider, chatReq.Messages)
 	chatReq.Stream = true
 
+	if _, ok := r.responsesOnly.Load(provider.Name); ok {
+		return r.forwardToResponsesStream(llmCtx, cancel, provider, chatReq)
+	}
+
 	reqBody, err := json.Marshal(chatReq)
 	if err != nil {
 		cancel()
@@ -190,6 +194,11 @@ func (r *Router) forwardToProviderStream(ctx context.Context, provider *Provider
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusBadRequest && needsResponsesAPI(body) && responsesEndpoint(provider) != "" {
+			slog.Info("provider needs the Responses API for tool calls, switching", "provider", provider.Name)
+			r.responsesOnly.Store(provider.Name, true)
+			return r.forwardToResponsesStream(llmCtx, cancel, provider, chatReq)
+		}
 		cancel()
 		return nil, fmt.Errorf("provider %s returned %d: %s", provider.Name, resp.StatusCode, body)
 	}
@@ -936,7 +945,7 @@ func translateAnthropicSSE(r io.Reader, w io.Writer) {
 
 					stopReason = finishReasonStop
 				case "tool_use":
-					stopReason = "tool_calls"
+					stopReason = finishReasonToolCalls
 				}
 				chunk := streamingChatCompletionChunk{
 					ID:     msgID,
