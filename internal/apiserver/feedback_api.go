@@ -68,9 +68,10 @@ func readFeedback(w http.ResponseWriter, r *http.Request) (feedbackRequest, erro
 
 // feedbackFrom builds the stored feedback for a request, or returns the reason
 // it cannot be stored.
-func feedbackFrom(req feedbackRequest, namespace, run, tenantName, user, source string) (postgresql.Feedback, error) {
+func feedbackFrom(req feedbackRequest, namespace string, src callSource, tenantName, user, source string) (postgresql.Feedback, error) {
 	f := postgresql.Feedback{
-		Tenant: tenantName, Namespace: namespace, RunName: run,
+		Tenant: tenantName, Namespace: namespace, RunName: src.Name,
+		Agent: src.Agent, Deployment: src.Deployment, Workflow: src.Workflow, WorkflowStep: src.WorkflowStep,
 		DecisionID: req.DecisionID, TurnIndex: req.Turn,
 		Rating: req.Rating, Comment: req.Comment, UserID: user, Source: source,
 	}
@@ -145,7 +146,14 @@ func (s *UIServer) handleRunFeedback(w http.ResponseWriter, r *http.Request, ns,
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	f, err := feedbackFrom(req, ns, runName, feedbackTenantName(tenant), user, postgresql.FeedbackSourceUI)
+	// The rating is filed under the run's Agent, so it counts towards that
+	// Agent whether the run was a one-off, a deployment's session or a workflow step.
+	src, err := resolveCallSource(r.Context(), s.crdClient, ns, runName)
+	if err != nil {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	f, err := feedbackFrom(req, ns, src, feedbackTenantName(tenant), user, postgresql.FeedbackSourceUI)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -187,7 +195,7 @@ func (s *ExternalAPIServer) feedbackTask(w http.ResponseWriter, r *http.Request,
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	f, err := feedbackFrom(req, run.Namespace, run.Name, tenant.TenantName, feedbackUser(tenant), postgresql.FeedbackSourceAPI)
+	f, err := feedbackFrom(req, run.Namespace, sourceOfRun(run), tenant.TenantName, feedbackUser(tenant), postgresql.FeedbackSourceAPI)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return

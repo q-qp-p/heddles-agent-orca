@@ -150,6 +150,8 @@ A person can rate how the models were chosen, on a whole run or on one routing d
 Rating the same target again replaces the earlier rating. Ratings are stored in PostgreSQL
 (`routing_feedback`); without it, rating is refused with a 503 instead of being dropped.
 
+**Ratings belong to the Agent.** A rating is stored with the Agent whose work it rates, and with the deployment or workflow step the run was part of, if any. Routing is judged per Agent, so ratings of a one-off run, of a deployment's chat sessions and of a workflow's steps all count towards the Agent that did the work, and they are still attributed after the run is cleaned up. Rating a run that does not exist is refused with a 404. A rating of a whole workflow is not supported yet; rate its steps.
+
 ## Benchmarking routing
 
 A `RoutingBenchmark` measures whether routing's choices are worth their cost for a set of Agents. It replays a small sample of their calls on another model, has a judge model compare the two answers, and records the verdict. Nothing the user sees changes: the replay runs after the served answer is complete, never runs a tool, and is paid from the benchmark's own budget, not the run's.

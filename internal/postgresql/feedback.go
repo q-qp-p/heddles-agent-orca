@@ -42,6 +42,13 @@ type Feedback struct {
 	Tenant    string `json:"tenant,omitempty"`
 	Namespace string `json:"namespace"`
 	RunName   string `json:"runName"`
+	// Agent is the Agent whose work was rated, so ratings build up per Agent.
+	Agent string `json:"agent"`
+	// Deployment, Workflow and WorkflowStep say what the run was part of: an
+	// AgentDeployment's chat session, or a workflow step. Empty when neither.
+	Deployment   string `json:"deployment,omitempty"`
+	Workflow     string `json:"workflow,omitempty"`
+	WorkflowStep string `json:"workflowStep,omitempty"`
 	// DecisionID is empty for a rating of the whole run.
 	DecisionID string `json:"decisionId,omitempty"`
 	// TurnIndex is the turn the rating is for, when the caller knows it.
@@ -59,6 +66,8 @@ func (f Feedback) Validate() error {
 	switch {
 	case f.Namespace == "" || f.RunName == "":
 		return fmt.Errorf("%w: namespace and run are required", ErrInvalidFeedback)
+	case f.Agent == "":
+		return fmt.Errorf("%w: agent is required", ErrInvalidFeedback)
 	case f.Rating != 1 && f.Rating != -1:
 		return fmt.Errorf("%w: rating must be 1 or -1", ErrInvalidFeedback)
 	case len(f.Comment) > MaxFeedbackCommentBytes:
@@ -75,8 +84,9 @@ func (f Feedback) Validate() error {
 
 const upsertFeedbackSQL = `
 INSERT INTO routing_feedback
-	(tenant, namespace, run_name, decision_id, turn_index, rating, comment, user_id, source)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	(tenant, namespace, run_name, agent, deployment, workflow, workflow_step,
+	 decision_id, turn_index, rating, comment, user_id, source)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (namespace, run_name, decision_id, user_id) DO UPDATE SET
 	rating = EXCLUDED.rating,
 	comment = EXCLUDED.comment,
@@ -95,7 +105,8 @@ func (s *Store) UpsertFeedback(ctx context.Context, f Feedback) error {
 		turn = *f.TurnIndex
 	}
 	if _, err := s.db.ExecContext(ctx, upsertFeedbackSQL,
-		f.Tenant, f.Namespace, f.RunName, f.DecisionID, turn, f.Rating, f.Comment, f.UserID, f.Source); err != nil {
+		f.Tenant, f.Namespace, f.RunName, f.Agent, f.Deployment, f.Workflow, f.WorkflowStep,
+		f.DecisionID, turn, f.Rating, f.Comment, f.UserID, f.Source); err != nil {
 		return fmt.Errorf("storing feedback: %w", err)
 	}
 	return nil
@@ -105,7 +116,8 @@ func (s *Store) UpsertFeedback(ctx context.Context, f Feedback) error {
 // limits them to that user's.
 func (s *Store) FeedbackForRun(ctx context.Context, namespace, run, user string) ([]Feedback, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT COALESCE(tenant, ''), decision_id, turn_index, rating, comment, user_id, source, created_at, updated_at
+		SELECT COALESCE(tenant, ''), agent, deployment, workflow, workflow_step, decision_id, turn_index, rating,
+			comment, user_id, source, created_at, updated_at
 		FROM routing_feedback
 		WHERE namespace = $1 AND run_name = $2 AND ($3 = '' OR user_id = $3)
 		ORDER BY created_at, id`, namespace, run, user)
@@ -117,7 +129,7 @@ func (s *Store) FeedbackForRun(ctx context.Context, namespace, run, user string)
 	for rows.Next() {
 		f := Feedback{Namespace: namespace, RunName: run}
 		var turn sql.NullInt64
-		if err := rows.Scan(&f.Tenant, &f.DecisionID, &turn, &f.Rating, &f.Comment, &f.UserID, &f.Source, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		if err := rows.Scan(&f.Tenant, &f.Agent, &f.Deployment, &f.Workflow, &f.WorkflowStep, &f.DecisionID, &turn, &f.Rating, &f.Comment, &f.UserID, &f.Source, &f.CreatedAt, &f.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning feedback: %w", err)
 		}
 		if turn.Valid {

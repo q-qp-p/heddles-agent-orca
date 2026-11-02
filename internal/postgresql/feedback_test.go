@@ -27,7 +27,7 @@ import (
 )
 
 func goodFeedback() Feedback {
-	return Feedback{Namespace: "ns", RunName: "run", Rating: -1, UserID: "ada", Source: FeedbackSourceUI}
+	return Feedback{Namespace: "ns", RunName: "run", Agent: "coder", Rating: -1, UserID: "ada", Source: FeedbackSourceUI}
 }
 
 func TestFeedbackValidate(t *testing.T) {
@@ -46,6 +46,7 @@ func TestFeedbackValidate(t *testing.T) {
 		{"comment over the limit", func(f *Feedback) { f.Comment = strings.Repeat("x", MaxFeedbackCommentBytes+1) }, false},
 		{"no user", func(f *Feedback) { f.UserID = "" }, false},
 		{"no run", func(f *Feedback) { f.RunName = "" }, false},
+		{"no agent", func(f *Feedback) { f.Agent = "" }, false},
 		{"no namespace", func(f *Feedback) { f.Namespace = "" }, false},
 		{"unknown source", func(f *Feedback) { f.Source = "email" }, false},
 		{"negative turn", func(f *Feedback) { f.TurnIndex = &neg }, false},
@@ -68,10 +69,11 @@ func TestFeedbackValidate(t *testing.T) {
 func TestUpsertFeedback_BindsEveryColumn(t *testing.T) {
 	s, mock := costMock(t)
 	turn := 3
-	f := Feedback{Tenant: "acme", Namespace: "ns", RunName: "run", DecisionID: "d-1", TurnIndex: &turn,
+	f := Feedback{Tenant: "acme", Namespace: "ns", RunName: "run", Agent: "coder", Deployment: "assistant",
+		Workflow: "release", WorkflowStep: "review", DecisionID: "d-1", TurnIndex: &turn,
 		Rating: 1, Comment: "right call", UserID: "ada", Source: FeedbackSourceAPI}
 	mock.ExpectExec(`INSERT INTO routing_feedback`).
-		WithArgs("acme", "ns", "run", "d-1", 3, 1, "right call", "ada", "api").
+		WithArgs("acme", "ns", "run", "coder", "assistant", "release", "review", "d-1", 3, 1, "right call", "ada", "api").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	if err := s.UpsertFeedback(context.Background(), f); err != nil {
 		t.Fatal(err)
@@ -84,7 +86,7 @@ func TestUpsertFeedback_BindsEveryColumn(t *testing.T) {
 func TestUpsertFeedback_NoTurnBindsNull(t *testing.T) {
 	s, mock := costMock(t)
 	mock.ExpectExec(`INSERT INTO routing_feedback`).
-		WithArgs("", "ns", "run", "", nil, -1, "", "ada", "ui").
+		WithArgs("", "ns", "run", "coder", "", "", "", "", nil, -1, "", "ada", "ui").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	if err := s.UpsertFeedback(context.Background(), goodFeedback()); err != nil {
 		t.Fatal(err)
@@ -118,16 +120,16 @@ func TestUpsertFeedback_RejectsInvalidBeforeTheDatabase(t *testing.T) {
 func TestFeedbackForRun(t *testing.T) {
 	s, mock := costMock(t)
 	at := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
-	cols := []string{"tenant", "decision_id", "turn_index", "rating", "comment", "user_id", "source", "created_at", "updated_at"}
+	cols := []string{"tenant", "agent", "deployment", "workflow", "workflow_step", "decision_id", "turn_index", "rating", "comment", "user_id", "source", "created_at", "updated_at"}
 	mock.ExpectQuery(`FROM routing_feedback`).WithArgs("ns", "run", "ada").
 		WillReturnRows(sqlmock.NewRows(cols).
-			AddRow("acme", "d-1", 2, 1, "good", "ada", "ui", at, at).
-			AddRow("acme", "", nil, -1, "", "ada", "ui", at, at))
+			AddRow("acme", "coder", "", "release", "review", "d-1", 2, 1, "good", "ada", "ui", at, at).
+			AddRow("acme", "coder", "", "", "", "", nil, -1, "", "ada", "ui", at, at))
 	got, err := s.FeedbackForRun(context.Background(), "ns", "run", "ada")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].DecisionID != "d-1" || got[0].TurnIndex == nil || *got[0].TurnIndex != 2 || got[0].Rating != 1 {
+	if len(got) != 2 || got[0].Agent != "coder" || got[0].Workflow != "release" || got[0].WorkflowStep != "review" || got[0].DecisionID != "d-1" || got[0].TurnIndex == nil || *got[0].TurnIndex != 2 || got[0].Rating != 1 {
 		t.Errorf("first = %+v", got)
 	}
 	if got[1].DecisionID != "" || got[1].TurnIndex != nil || got[1].Rating != -1 {

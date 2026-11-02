@@ -79,9 +79,32 @@ func tenantCtx(t *TenantIdentity) context.Context {
 
 var ada = &TenantIdentity{TenantName: shadowTenant, Namespaces: []string{"team-a"}, UserID: "ada"}
 
+// feedbackUIServer is a UI server whose cluster has the runs the tests rate:
+// plain runs of the Agent "coder", a deployment's chat run, a workflow step's
+// run, and the deployment itself.
+func feedbackUIServer(t *testing.T, store feedbackStore) *UIServer {
+	t.Helper()
+	run := func(ns, name string, labels map[string]string) *agentorcav1alpha1.AgentRun {
+		return &agentorcav1alpha1.AgentRun{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels},
+			Spec:       agentorcav1alpha1.AgentRunSpec{AgentRef: shadowAgent},
+		}
+	}
+	cl := fake.NewClientBuilder().WithScheme(adminScheme(t)).WithObjects(
+		run("team-a", "run-1", nil), run("team-a", "r", nil), run("ns", "run", nil),
+		run("team-a", "chat-run", map[string]string{"agentorca.io/deployment": "assistant"}),
+		run("team-a", "step-run", map[string]string{"agentorca.io/workflow": "release", "agentorca.io/workflow-step": "review"}),
+		&agentorcav1alpha1.AgentDeployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "assistant", Namespace: "team-a"},
+			Spec:       agentorcav1alpha1.AgentDeploymentSpec{AgentRef: "helper"},
+		},
+	).Build()
+	return &UIServer{feedback: store, crdClient: cl}
+}
+
 func TestRunFeedback_StoresARatingOfADecision(t *testing.T) {
 	store := &fakeFeedbackStore{}
-	s := &UIServer{feedback: store}
+	s := feedbackUIServer(t, store)
 	rec := feedbackReq(s, tenantCtx(ada), http.MethodPost, "/api/runs/team-a/run-1/feedback",
 		`{"rating":-1,"comment":"wrong model","decisionId":"d-1","turn":2}`)
 	if rec.Code != http.StatusNoContent {
@@ -94,9 +117,53 @@ func TestRunFeedback_StoresARatingOfADecision(t *testing.T) {
 	}
 }
 
+// A rating counts towards the Agent whose work it is, however that work ran, so
+// ratings build up per Agent across runs, deployment sessions and workflow steps.
+func TestRunFeedback_FilesTheRatingUnderTheRunsAgent(t *testing.T) {
+	store := &fakeFeedbackStore{}
+	s := feedbackUIServer(t, store)
+	for _, run := range []string{"run-1", "chat-run", "step-run"} {
+		if rec := feedbackReq(s, tenantCtx(ada), http.MethodPost, "/api/runs/team-a/"+run+"/feedback", `{"rating":1}`); rec.Code != http.StatusNoContent {
+			t.Fatalf("%s: status = %d: %s", run, rec.Code, rec.Body)
+		}
+	}
+	plain, chat, step := store.rows["team-a|run-1||ada"], store.rows["team-a|chat-run||ada"], store.rows["team-a|step-run||ada"]
+	if plain.Agent != shadowAgent || plain.Deployment != "" || plain.Workflow != "" {
+		t.Errorf("plain run = %+v", plain)
+	}
+	if chat.Agent != shadowAgent || chat.Deployment != "assistant" {
+		t.Errorf("a deployment's chat run = %+v, want the Agent and the deployment", chat)
+	}
+	if step.Agent != shadowAgent || step.Workflow != "release" || step.WorkflowStep != "review" {
+		t.Errorf("a workflow step's run = %+v, want the Agent, the workflow and the step", step)
+	}
+}
+
+func TestRunFeedback_RatingADeploymentByNameUsesItsAgent(t *testing.T) {
+	store := &fakeFeedbackStore{}
+	s := feedbackUIServer(t, store)
+	if rec := feedbackReq(s, tenantCtx(ada), http.MethodPost, "/api/runs/team-a/assistant/feedback", `{"rating":-1}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if got := store.rows["team-a|assistant||ada"]; got.Agent != "helper" || got.Deployment != "assistant" {
+		t.Errorf("stored = %+v, want the deployment's own Agent", got)
+	}
+}
+
+func TestRunFeedback_UnknownRunIs404AndStoresNothing(t *testing.T) {
+	store := &fakeFeedbackStore{}
+	s := feedbackUIServer(t, store)
+	if rec := feedbackReq(s, tenantCtx(ada), http.MethodPost, "/api/runs/team-a/ghost/feedback", `{"rating":1}`); rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	if store.hits != 0 {
+		t.Error("a rating of a run that does not exist reached the store")
+	}
+}
+
 func TestRunFeedback_RatingAgainReplacesTheFirst(t *testing.T) {
 	store := &fakeFeedbackStore{}
-	s := &UIServer{feedback: store}
+	s := feedbackUIServer(t, store)
 	for _, body := range []string{`{"rating":-1,"decisionId":"d-1"}`, `{"rating":1,"decisionId":"d-1"}`} {
 		if rec := feedbackReq(s, tenantCtx(ada), http.MethodPost, "/api/runs/team-a/run-1/feedback", body); rec.Code != http.StatusNoContent {
 			t.Fatalf("status = %d", rec.Code)
@@ -108,7 +175,7 @@ func TestRunFeedback_RatingAgainReplacesTheFirst(t *testing.T) {
 }
 
 func TestRunFeedback_RejectsWhatTheTableWould(t *testing.T) {
-	s := &UIServer{feedback: &fakeFeedbackStore{}}
+	s := feedbackUIServer(t, &fakeFeedbackStore{})
 	for name, body := range map[string]string{
 		"rating zero":  `{"rating":0}`,
 		"rating three": `{"rating":3}`,
@@ -123,7 +190,7 @@ func TestRunFeedback_RejectsWhatTheTableWould(t *testing.T) {
 
 func TestRunFeedback_TenantsReachOnlyTheirNamespaces(t *testing.T) {
 	store := &fakeFeedbackStore{}
-	s := &UIServer{feedback: store}
+	s := feedbackUIServer(t, store)
 	if rec := feedbackReq(s, tenantCtx(ada), http.MethodPost, "/api/runs/team-b/run-1/feedback", `{"rating":1}`); rec.Code != http.StatusForbidden {
 		t.Errorf("other namespace: status = %d, want 403", rec.Code)
 	}
@@ -137,7 +204,7 @@ func TestRunFeedback_TenantsReachOnlyTheirNamespaces(t *testing.T) {
 
 func TestRunFeedback_GetReturnsOnlyTheCallersRatings(t *testing.T) {
 	store := &fakeFeedbackStore{}
-	s := &UIServer{feedback: store}
+	s := feedbackUIServer(t, store)
 	bob := &TenantIdentity{TenantName: shadowTenant, Namespaces: []string{"team-a"}, UserID: "bob"}
 	feedbackReq(s, tenantCtx(ada), http.MethodPost, "/api/runs/team-a/run-1/feedback", `{"rating":1,"decisionId":"d-1"}`)
 	feedbackReq(s, tenantCtx(bob), http.MethodPost, "/api/runs/team-a/run-1/feedback", `{"rating":-1,"decisionId":"d-1"}`)
@@ -152,18 +219,18 @@ func TestRunFeedback_WithoutPostgresIs503AndErrorsAre500(t *testing.T) {
 	if rec := feedbackReq(&UIServer{}, tenantCtx(ada), http.MethodPost, "/api/runs/team-a/r/feedback", `{"rating":1}`); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("no store: status = %d, want 503 (a rating must not vanish silently)", rec.Code)
 	}
-	s := &UIServer{feedback: &fakeFeedbackStore{err: errors.New("boom")}}
+	s := feedbackUIServer(t, &fakeFeedbackStore{err: errors.New("boom")})
 	if rec := feedbackReq(s, tenantCtx(ada), http.MethodPost, "/api/runs/team-a/r/feedback", `{"rating":1}`); rec.Code != http.StatusInternalServerError {
 		t.Errorf("store error: status = %d, want 500", rec.Code)
 	}
-	if rec := feedbackReq(&UIServer{feedback: &fakeFeedbackStore{}}, tenantCtx(ada), http.MethodDelete, "/api/runs/team-a/r/feedback", ""); rec.Code != http.StatusMethodNotAllowed {
+	if rec := feedbackReq(feedbackUIServer(t, &fakeFeedbackStore{}), tenantCtx(ada), http.MethodDelete, "/api/runs/team-a/r/feedback", ""); rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("DELETE: status = %d, want 405", rec.Code)
 	}
 }
 
 func TestRunFeedback_WithoutAuthenticationIsAnonymous(t *testing.T) {
 	store := &fakeFeedbackStore{}
-	s := &UIServer{feedback: store}
+	s := feedbackUIServer(t, store)
 	if rec := feedbackReq(s, context.Background(), http.MethodPost, "/api/runs/ns/run/feedback", `{"rating":1}`); rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -176,7 +243,7 @@ func taskFeedback(t *testing.T, store feedbackStore, tenant *TenantIdentity, tas
 	t.Helper()
 	run := &agentorcav1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{
 		Name: "task-1", Namespace: "team-a", Labels: map[string]string{"agentorca.io/tenant": taskTenantLabel},
-	}}
+	}, Spec: agentorcav1alpha1.AgentRunSpec{AgentRef: shadowAgent}}
 	s := &ExternalAPIServer{
 		auth:      &ExternalAuth{},
 		crdClient: fake.NewClientBuilder().WithScheme(adminScheme(t)).WithObjects(run).Build(),
@@ -197,7 +264,7 @@ func TestTaskFeedback_StoresAnAPIRating(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
 	got := store.rows["team-a|task-1||tenant:acme"]
-	if got.Rating != 1 || got.Source != postgresql.FeedbackSourceAPI || got.Comment != "nice" {
+	if got.Rating != 1 || got.Source != postgresql.FeedbackSourceAPI || got.Comment != "nice" || got.Agent != shadowAgent {
 		t.Errorf("stored = %+v", store.rows)
 	}
 }

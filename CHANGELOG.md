@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/runs/{ns}/{name}/feedback` (`GET` returns the caller's own ratings). Rating the same
   target again replaces the earlier rating. Ratings are stored in `routing_feedback` (migration
   `0004`), which needs PostgreSQL: without it the endpoints answer 503 rather than drop the rating.
+  Each rating is filed under the Agent whose work it rates, and the deployment or workflow step the
+  run was part of (migration `0006`), so ratings count towards the Agent even after the run is gone.
 - **A plain reason for every routing decision** — the reason on a decision is now one sentence that
   says what was chosen and why, for example "Escalated to sonnet-5-5: tool calls have been failing
   repeatedly (stage tool-exec; stage_router override)". It covers every Switchyard label, every rule,
