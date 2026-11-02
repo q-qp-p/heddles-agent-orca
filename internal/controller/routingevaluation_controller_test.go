@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -420,5 +421,140 @@ func TestEvaluation_ADeadProviderThatARoleStillUsesIsReportedNotRemoved(t *testi
 	recs := w.recs(t)
 	if len(recs) != 1 || recs[0].Spec.Patch != "" || !strings.Contains(recs[0].Spec.Reason, "still sends traffic") {
 		t.Fatalf("recommendations = %+v, want a report-only deadProvider that explains why", recs)
+	}
+}
+
+// --- the check made after a change was applied ---------------------------------
+
+// weakServed makes n judged pairs of calls the weak model served and the strong
+// one was asked to replay: capableWins of them the strong model won, the rest tied.
+func weakServed(n, capableWins int) routingbench.Observations {
+	var obs routingbench.Observations
+	for i := range n {
+		w := routingbench.WinnerTie
+		if i < capableWins {
+			w = routingbench.WinnerShadow // the shadow is the strong model
+		}
+		obs.Samples = append(obs.Samples, routingbench.Sample{
+			Agent: benchAgent, Category: evalChat, ServedProvider: evalWeak, ShadowProvider: evalStrong, Winner: w,
+			ServedCostUSD: 0.001, ShadowCostUSD: 0.010,
+		})
+	}
+	return obs
+}
+
+// appliedRec adds an overspend change that was applied at the given time. spec
+// changes the proposal before it is created and status the state afterwards, since
+// a status update does not persist spec.
+func (w *evalWorld) appliedRec(t *testing.T, name string, appliedAt time.Time, spec, status func(*agentorcav1alpha1.RoutingRecommendation)) {
+	t.Helper()
+	rec := &agentorcav1alpha1.RoutingRecommendation{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns", Labels: map[string]string{labelRecSelector: evalSel}},
+		Spec: agentorcav1alpha1.RoutingRecommendationSpec{
+			SelectorRef: evalSel, Detector: agentorcav1alpha1.DetectorOverspend, Agent: benchAgent, Category: evalChat,
+			Summary: "weak answers as well", BaseGeneration: 3, Patch: `{"spec":{"capabilityRouting":{"stage:chat":"weak"}}}`,
+		},
+	}
+	if spec != nil {
+		spec(rec)
+	}
+	if err := w.c.Create(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	at := metav1.NewTime(appliedAt)
+	rec.Status.Phase, rec.Status.AppliedAt, rec.Status.AppliedGeneration = agentorcav1alpha1.RecommendationApplied, &at, 4
+	if status != nil {
+		status(rec)
+	}
+	if err := w.c.Status().Update(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (w *evalWorld) postApply(t *testing.T, name string) *agentorcav1alpha1.PostApplyStatus {
+	t.Helper()
+	var rec agentorcav1alpha1.RoutingRecommendation
+	if err := w.c.Get(context.Background(), client.ObjectKey{Namespace: "ns", Name: name}, &rec); err != nil {
+		t.Fatal(err)
+	}
+	return rec.Status.PostApply
+}
+
+func TestEvaluation_AChangeThatMadeAnswersWorseIsFlaggedAWindowLater(t *testing.T) {
+	w := newEvalWorld(t, nil)
+	events := record.NewFakeRecorder(10)
+	w.r.Recorder = events
+	w.src.obs = weakServed(100, 40) // the strong model wins 40 of 100 on what the weak one now serves
+	w.appliedRec(t, "applied-regress", w.now.Add(-8*24*time.Hour), nil, nil)
+	w.reconcile(t)
+	pa := w.postApply(t, "applied-regress")
+	if pa == nil || pa.Verdict != routingbench.VerdictRegressed || !strings.Contains(pa.Message, "100 judged pairs") {
+		t.Fatalf("post-apply = %+v", pa)
+	}
+	if len(events.Events) != 2 {
+		t.Errorf("events = %d, want a warning on the recommendation and on the selector", len(events.Events))
+	}
+	// Only the pairs since the change count.
+	if got := w.src.last; got.Agents[0] != benchAgent || !got.Since.Equal(w.now.Add(-8*24*time.Hour)) {
+		t.Errorf("check queried %+v, want the Agent's pairs since it was applied", got)
+	}
+}
+
+func TestEvaluation_AChangeThatHeldUpIsConfirmed(t *testing.T) {
+	w := newEvalWorld(t, nil)
+	w.src.obs = weakServed(100, 1)
+	w.appliedRec(t, "applied-fine", w.now.Add(-8*24*time.Hour), nil, nil)
+	w.reconcile(t)
+	if pa := w.postApply(t, "applied-fine"); pa == nil || pa.Verdict != routingbench.VerdictConfirmed {
+		t.Errorf("post-apply = %+v", pa)
+	}
+}
+
+func TestEvaluation_ChecksNothingBeforeAWindowHasPassed(t *testing.T) {
+	w := newEvalWorld(t, nil)
+	w.src.obs = weakServed(100, 40)
+	w.appliedRec(t, "applied-young", w.now.Add(-24*time.Hour), nil, nil)
+	w.reconcile(t)
+	if pa := w.postApply(t, "applied-young"); pa != nil {
+		t.Errorf("post-apply = %+v, want none a day after the change", pa)
+	}
+}
+
+func TestEvaluation_ATooThinCheckIsRetriedOnceThenRecordedAsInconclusive(t *testing.T) {
+	w := newEvalWorld(t, nil)
+	w.src.obs = weakServed(5, 5)
+	w.appliedRec(t, "applied-thin", w.now.Add(-8*24*time.Hour), nil, nil)
+	w.appliedRec(t, "applied-old", w.now.Add(-20*24*time.Hour), nil, nil)
+	w.reconcile(t)
+	if pa := w.postApply(t, "applied-thin"); pa != nil {
+		t.Errorf("a check with too little to say was recorded after one window: %+v", pa)
+	}
+	if pa := w.postApply(t, "applied-old"); pa == nil || pa.Verdict != routingbench.VerdictInconclusive {
+		t.Errorf("after two windows with too little to say: %+v", pa)
+	}
+}
+
+func TestEvaluation_OtherChangesAndFinishedChecksAreLeftAlone(t *testing.T) {
+	w := newEvalWorld(t, nil)
+	w.src.obs = weakServed(100, 40)
+	long := w.now.Add(-8 * 24 * time.Hour)
+	w.appliedRec(t, "applied-underpowered", long, func(r *agentorcav1alpha1.RoutingRecommendation) {
+		r.Spec.Detector = agentorcav1alpha1.DetectorUnderpowered
+	}, nil)
+	w.appliedRec(t, "applied-checked", long, nil, func(r *agentorcav1alpha1.RoutingRecommendation) {
+		r.Status.PostApply = &agentorcav1alpha1.PostApplyStatus{Verdict: agentorcav1alpha1.PostApplyConfirmed}
+	})
+	w.appliedRec(t, "applied-rolledback", long, nil, func(r *agentorcav1alpha1.RoutingRecommendation) {
+		r.Status.Phase = agentorcav1alpha1.RecommendationRolledBack
+	})
+	w.reconcile(t)
+	if pa := w.postApply(t, "applied-underpowered"); pa != nil {
+		t.Errorf("underpowered change was checked: %+v", pa)
+	}
+	if pa := w.postApply(t, "applied-checked"); pa == nil || pa.Verdict != agentorcav1alpha1.PostApplyConfirmed {
+		t.Errorf("a finished check was redone: %+v", pa)
+	}
+	if pa := w.postApply(t, "applied-rolledback"); pa != nil {
+		t.Errorf("a rolled-back change was checked: %+v", pa)
 	}
 }

@@ -479,6 +479,15 @@ func main() {
 		webhookNotifier := &controller.WebhookApprovalNotifier{URL: u, UIURL: os.Getenv("APPROVALS_UI_URL")}
 		approvalNotifier, completionNotifier = webhookNotifier, webhookNotifier
 	}
+	// A recommendation is applied only after an approver agrees, so applying needs
+	// the same PostgreSQL-backed approvals as the other approval flows.
+	if err := (&controller.RoutingRecommendationReconciler{
+		Client: mgr.GetClient(), Scheme: mgr.GetScheme(),
+		Approvals: approvals, ApprovalNotifier: approvalNotifier,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "RoutingRecommendation")
+		os.Exit(1)
+	}
 	var gitHubApp controller.GitHubTokenMinter
 	if dir := os.Getenv("GITHUB_APP_DIR"); dir != "" {
 		app, err := githubapp.FromDir(dir, os.Getenv("GITHUB_API_URL"))

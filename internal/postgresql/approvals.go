@@ -51,6 +51,13 @@ const ApprovalKindWorkflow = "workflow"
 // ApprovalKindBudget is a request to raise a paused run's spend cap.
 const ApprovalKindBudget = "budget"
 
+// ApprovalKindRouting is a request to apply a RoutingRecommendation's patch to a
+// ModelSelector. It belongs to no run, so its run name is empty.
+const ApprovalKindRouting = "routing"
+
+// ApprovalKindRoutingRollback is a request to undo an applied RoutingRecommendation.
+const ApprovalKindRoutingRollback = "routing-rollback"
+
 // ErrApprovalNotPending is returned when deciding an approval that has
 // already been decided, expired or withdrawn.
 var ErrApprovalNotPending = errors.New("approval is no longer pending")

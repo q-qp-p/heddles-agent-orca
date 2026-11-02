@@ -222,3 +222,30 @@ A group of calls needs `evaluation.minSamples` judged pairs before anything is r
 **Shared selectors.** If other Agents use the same selector, a change is proposed only when every one of them has enough judged pairs and the same finding. Otherwise the recommendation has no patch and its `spec.reason` names the Agents holding it back. Give an Agent its own selector to tune it separately.
 
 **Reading a recommendation.** `spec` is what the operator proposed and cannot be edited, except `action`. `status.phase` is `Proposed`, or `Expired` once the evidence no longer supports it, or `Superseded` by a newer finding of the same kind. `status.evidence` is refreshed on every evaluation. A `strategySwitch` carries a caveat: replayed samples cannot show how a `stage_router` would behave.
+
+### Applying a recommendation
+
+By default a recommendation is for reading: you apply the patch yourself. To have the operator apply it after an approver agrees, put a benchmark with `mode: proposeApply` and `approverGroups` over the selector's Agents:
+
+```yaml
+spec:
+  mode: proposeApply
+  approverGroups: [platform]
+```
+
+The operator then raises an approval for every recommendation that has a patch. Or leave the benchmark on `reportOnly` for the default and ask for a particular one by hand, which also needs `proposeApply`:
+
+```bash
+kubectl patch routingrecommendation <name> --type merge -p '{"spec":{"action":"requestApply"}}'
+```
+
+Approvers decide in the approvals view, like any other approval (kinds `routing` and `routing-rollback`, which belong to no run). The operator then:
+
+- applies the patch to the ModelSelector with a conditional update, and stamps the selector with the annotation `agentorca.io/last-recommendation`;
+- refuses, and marks the recommendation `Stale`, if the selector's generation is not the one the finding was made against, even if the approval was granted: the evidence no longer describes what would change;
+- applies only changes to `spec`, never metadata;
+- records the patch that undoes the change, worked out from the selector as it was just before, in `status.appliedRollbackPatch`.
+
+**Rolling back.** `spec.action: rollback` on an applied recommendation raises its own approval. If the selector was changed again since, the rollback is refused and `status.conditions` (`RollbackBlocked`) gives the patch to apply by hand, since restoring would also undo that change. A rejected rollback leaves the change in place and is not asked for again.
+
+**Checked afterwards.** A change that sent a kind of work to the cheaper model (`overspend`) is checked once a benchmark window has passed: the operator looks at the replayed pairs since the change, and `status.postApply.verdict` is `Confirmed`, `Regressed` (the capable model is clearly better again by more than the margin) or `Inconclusive`. A regression raises a rollback approval where applying is allowed; it never rolls back by itself. Other kinds of change are not checked (`NotAssessed`).

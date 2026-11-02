@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Applying a routing recommendation, with approval** — a `RoutingBenchmark` with `mode: proposeApply`
+  and `approverGroups` now lets its Agents' selectors be changed by a recommendation once an approver
+  agrees. The operator raises an approval for each recommendation that has a patch (or you ask with
+  `spec.action: requestApply`), and applies the patch to the ModelSelector only after approval, only if
+  the selector has not changed since the finding (otherwise the recommendation is `Stale`), and only to
+  `spec`. It records the patch that undoes the change; `spec.action: rollback` asks for it, with its own
+  approval. A window after a change that sent work to a cheaper model, the operator checks the answers
+  afterwards and, if they got clearly worse, records `Regressed` and asks for a rollback. Nothing is ever
+  rolled back without an approver. Needs PostgreSQL (migration `0007` adds an index for the evaluator).
 - **Routing recommendations** — the operator now looks at how each ModelSelector has been routing and
   writes what it finds as `RoutingRecommendation` resources: a summary, the numbers behind it, a JSON
   merge patch against the selector and the patch that undoes it. It never changes a selector itself.

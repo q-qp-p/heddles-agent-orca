@@ -29,9 +29,11 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -76,6 +78,9 @@ type RoutingEvaluationReconciler struct {
 	Source routingbench.Source
 	// Disabled turns every evaluation off (--routing-recommendations=false).
 	Disabled bool
+
+	// Recorder emits events; optional.
+	Recorder record.EventRecorder
 
 	// now is the clock; nil means time.Now.
 	now func() time.Time
@@ -135,6 +140,9 @@ func (r *RoutingEvaluationReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 	findings := routingbench.Analyze(obs, cluster, query, optionsOf(bench))
 	if err := r.record(ctx, &sel, bench, findings, now); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.checkApplied(ctx, &sel, bench, cluster, now); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: interval}, nil
@@ -292,6 +300,74 @@ func (r *RoutingEvaluationReconciler) record(ctx context.Context, sel *agentorca
 		}
 	}
 	return r.publish(ctx, sel, bench, byName)
+}
+
+// checkApplied judges the changes that sent work to the cheaper model, one window
+// after each was applied: did the answers get worse? Those are the changes that
+// can quietly do harm, so they are the ones checked. A check that finds too
+// little to say is tried again, once, a window later. A regression is recorded
+// and never acted on here; the recommendation's controller asks for a rollback
+// where the benchmark allows it.
+func (r *RoutingEvaluationReconciler) checkApplied(ctx context.Context, sel *agentorcav1alpha1.ModelSelector, bench *agentorcav1alpha1.RoutingBenchmark, cluster routingbench.Cluster, now time.Time) error {
+	var list agentorcav1alpha1.RoutingRecommendationList
+	if err := r.List(ctx, &list, client.InNamespace(sel.Namespace), client.MatchingLabels{labelRecSelector: sel.Name}); err != nil {
+		return fmt.Errorf("listing RoutingRecommendations: %w", err)
+	}
+	window, opts := benchmarkWindowOrDefault(bench), optionsOf(bench)
+	for i := range list.Items {
+		rec := &list.Items[i]
+		if rec.Status.Phase != agentorcav1alpha1.RecommendationApplied || rec.Status.PostApply != nil ||
+			rec.Spec.Detector != agentorcav1alpha1.DetectorOverspend || rec.Status.AppliedAt == nil || rec.Spec.Agent == "" {
+			continue
+		}
+		since := rec.Status.AppliedAt.Time
+		age := now.Sub(since)
+		if age < window {
+			continue
+		}
+		obs, err := r.Source.LoadObservations(ctx, routingbench.Query{
+			Namespace: sel.Namespace, Agents: []string{rec.Spec.Agent}, Since: since, Now: now,
+		})
+		if err != nil {
+			return fmt.Errorf("loading evidence for the check of %s: %w", rec.Name, err)
+		}
+		verdict, w := routingbench.AnalyzeDowngrade(obs, cluster, rec.Spec.Agent, rec.Spec.Category, opts)
+		if verdict == routingbench.VerdictInconclusive && age < 2*window {
+			continue
+		}
+		evaluated := metav1.NewTime(now)
+		base := rec.DeepCopy()
+		rec.Status.PostApply = &agentorcav1alpha1.PostApplyStatus{
+			Verdict: verdict, EvaluatedAt: &evaluated, Message: postApplyMessage(verdict, w, opts),
+		}
+		if err := r.Status().Patch(ctx, rec, client.MergeFrom(base)); err != nil {
+			return fmt.Errorf("recording the check of %s: %w", rec.Name, err)
+		}
+		if verdict == routingbench.VerdictRegressed && r.Recorder != nil {
+			r.Recorder.Eventf(rec, corev1.EventTypeWarning, "Regressed", "%s", rec.Status.PostApply.Message)
+			r.Recorder.Eventf(sel, corev1.EventTypeWarning, "RoutingRegressed", "after applying %s: %s", rec.Name, rec.Status.PostApply.Message)
+		}
+	}
+	return nil
+}
+
+func postApplyMessage(verdict string, w routingbench.Worth, opts routingbench.Options) string {
+	switch verdict {
+	case routingbench.VerdictRegressed:
+		return fmt.Sprintf("since the change, across %d judged pairs the capable model's answers win by %.0f%% (at least %.0f%%), more than the %.0f%% allowed",
+			w.N, w.NetWin*100, w.NetWinCI.Lo*100, optsMargin(opts)*100)
+	case routingbench.VerdictConfirmed:
+		return fmt.Sprintf("since the change, across %d judged pairs the capable model's answers win by %.0f%% (at most %.0f%%): not worse than the %.0f%% allowed",
+			w.N, w.NetWin*100, w.NetWinCI.Hi*100, optsMargin(opts)*100)
+	}
+	return fmt.Sprintf("too few judged pairs since the change to say (%d)", w.N)
+}
+
+func optsMargin(o routingbench.Options) float64 {
+	if o.NonInferiorityMargin > 0 {
+		return o.NonInferiorityMargin
+	}
+	return 0.05
 }
 
 // recommendationKey groups the versions of one finding.
@@ -461,6 +537,9 @@ func (r *RoutingEvaluationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// the opt-out annotation starts an evaluation; its own status does not.
 	selectorChanged := predicate.Or(predicate.GenerationChangedPredicate{}, predicate.AnnotationChangedPredicate{})
 	agentChanged := predicate.Or(predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{})
+	if r.Recorder == nil {
+		r.Recorder = mgr.GetEventRecorderFor("routingevaluation") //nolint:staticcheck
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agentorcav1alpha1.ModelSelector{}, builder.WithPredicates(selectorChanged)).
 		Watches(&agentorcav1alpha1.Agent{}, handler.EnqueueRequestsFromMapFunc(r.selectorsOfAgent), builder.WithPredicates(agentChanged)).

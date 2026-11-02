@@ -70,6 +70,18 @@ func (c Cluster) tiersOf(agent string) Tiers {
 	return t
 }
 
+// AnalyzeDowngrade checks a change that sent one Agent's kind of work to the
+// cheaper model against the pairs replayed since it was applied. No pairs for
+// that Agent and category is Inconclusive.
+func AnalyzeDowngrade(ev Observations, c Cluster, agent, category string, opts Options) (verdict string, w Worth) {
+	for _, g := range Aggregate(ev.Samples, c.tiersOf) {
+		if g.Agent == agent && g.Category == category {
+			return CheckDowngrade(g, opts)
+		}
+	}
+	return VerdictInconclusive, Worth{}
+}
+
 // Analyze turns loaded observations into findings. It is pure: the same observations,
 // cluster and options always give the same findings.
 func Analyze(ev Observations, c Cluster, q Query, opts Options) []Finding {
