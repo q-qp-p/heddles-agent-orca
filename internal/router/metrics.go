@@ -16,7 +16,12 @@ limitations under the License.
 
 package router
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"strings"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 // Metrics holds the Prometheus counters/gauges/histograms that the model-router
 // exposes on its :9091/metrics endpoint. They are registered into the
@@ -34,6 +39,23 @@ type Metrics struct {
 	// gives the run's full cost; the failed-call share is the part a
 	// success-only counter would hide.
 	spendUSD *prometheus.CounterVec
+	// llmTokens counts the tokens providers reported, by direction (prompt or
+	// completion). Unlike tokens, which counts streamed bytes as a live gauge,
+	// these are the billed figures.
+	llmTokens *prometheus.CounterVec
+	// llmLatency observes the time from routing a call to the end of its stream.
+	llmLatency *prometheus.HistogramVec
+	// llmTTFT observes the time from routing a call to its first token.
+	llmTTFT *prometheus.HistogramVec
+	// llmErrors counts failed calls by provider and error class.
+	llmErrors *prometheus.CounterVec
+	// routingDecisions counts selections by strategy, deciding path and stage.
+	routingDecisions *prometheus.CounterVec
+	// routingFallbacks counts calls served by a fallback after another failed.
+	routingFallbacks *prometheus.CounterVec
+	// telemetryDropped counts routing events dropped because the operator could
+	// not be reached and the queue filled.
+	telemetryDropped prometheus.Counter
 }
 
 // Outcomes of an LLM call for the spend metric.
@@ -81,9 +103,40 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "agentorca_modelrouter_spend_usd_total",
 			Help: "USD spent on LLM calls by this model-router, by run, provider, model and call outcome.",
 		}, []string{"namespace", "run", "provider", "model", "outcome"}),
+		llmTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "agentorca_modelrouter_llm_tokens_total",
+			Help: "Tokens providers reported for this model-router's LLM calls, by direction and provider.",
+		}, []string{"direction", "provider"}),
+		llmLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "agentorca_modelrouter_llm_latency_seconds",
+			Help:    "Time from routing an LLM call to the end of its response stream, by provider.",
+			Buckets: []float64{0.25, 0.5, 1, 2, 5, 10, 20, 45, 90, 180},
+		}, []string{"provider"}),
+		llmTTFT: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "agentorca_modelrouter_llm_ttft_seconds",
+			Help:    "Time from routing an LLM call to its first token, by provider.",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10, 30},
+		}, []string{"provider"}),
+		llmErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "agentorca_modelrouter_llm_errors_total",
+			Help: "Failed LLM calls, by provider and error class.",
+		}, []string{"provider", "class"}),
+		routingDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "agentorca_modelrouter_routing_decisions_total",
+			Help: "Routing decisions, by strategy, deciding path and task stage.",
+		}, []string{"strategy", "path", "stage"}),
+		routingFallbacks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "agentorca_modelrouter_routing_fallbacks_total",
+			Help: "Calls served by a fallback provider after another failed.",
+		}, []string{"from", "to"}),
+		telemetryDropped: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "agentorca_modelrouter_telemetry_events_dropped_total",
+			Help: "Routing telemetry events dropped because the operator was unreachable and the queue was full.",
+		}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.tokens, m.toolCalls, m.streamDuration, m.spendUSD)
+		reg.MustRegister(m.tokens, m.toolCalls, m.streamDuration, m.spendUSD,
+			m.llmTokens, m.llmLatency, m.llmTTFT, m.llmErrors, m.routingDecisions, m.routingFallbacks, m.telemetryDropped)
 	}
 	return m
 }
@@ -131,4 +184,51 @@ func (m *Metrics) InitSpendSeries(namespace, run, provider, model string) {
 	for _, outcome := range spendOutcomes {
 		m.spendUSD.WithLabelValues(namespace, run, provider, model, outcome).Add(0)
 	}
+}
+
+// RecordLLMCall records one finished LLM call: the tokens the provider reported,
+// its latency and time to first token (nil when no token arrived), and its
+// error class ("" when it succeeded). Nil-safe.
+func (m *Metrics) RecordLLMCall(provider string, promptTokens, completionTokens int, latency time.Duration, ttftMS *int, errClass string) {
+	if m == nil {
+		return
+	}
+	m.llmTokens.WithLabelValues("prompt", provider).Add(float64(promptTokens))
+	m.llmTokens.WithLabelValues("completion", provider).Add(float64(completionTokens))
+	m.llmLatency.WithLabelValues(provider).Observe(latency.Seconds())
+	if ttftMS != nil {
+		m.llmTTFT.WithLabelValues(provider).Observe(float64(*ttftMS) / 1000)
+	}
+	if errClass != "" {
+		m.llmErrors.WithLabelValues(provider, errClass).Inc()
+	}
+}
+
+// IncRoutingDecision counts one routing decision. The capability path carries
+// an operator-chosen key ("rule:capability:code"); only its prefix is a label,
+// so configuration cannot mint new series. Nil-safe.
+func (m *Metrics) IncRoutingDecision(strategy, path, stage string) {
+	if m == nil {
+		return
+	}
+	if strings.HasPrefix(path, pathCapability) {
+		path = strings.TrimSuffix(pathCapability, ":")
+	}
+	m.routingDecisions.WithLabelValues(strategy, path, stage).Inc()
+}
+
+// IncRoutingFallback counts one call served by a fallback provider. Nil-safe.
+func (m *Metrics) IncRoutingFallback(from, to string) {
+	if m == nil {
+		return
+	}
+	m.routingFallbacks.WithLabelValues(from, to).Inc()
+}
+
+// AddTelemetryDropped counts routing events dropped from a full queue. Nil-safe.
+func (m *Metrics) AddTelemetryDropped(n int) {
+	if m == nil {
+		return
+	}
+	m.telemetryDropped.Add(float64(n))
 }

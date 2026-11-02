@@ -34,3 +34,8 @@
 !pkg/python/agentorca/**
 !examples/agent-sdk-template
 !examples/agent-sdk-template/**
+
+# Fake LLM server for e2e tests (test/fakellm/Dockerfile).
+!test
+!test/fakellm
+!test/fakellm/**

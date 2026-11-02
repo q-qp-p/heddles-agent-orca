@@ -7,6 +7,10 @@
 # from it. It also checks that an UNlabeled pod in the same namespace is refused,
 # to prove the rule does not open :9091 to the whole namespace.
 #
+# The operator-labelled probe also checks the scrape carries the routing
+# telemetry series (agentorca_modelrouter_telemetry_events_dropped_total is
+# exported from the first scrape), so a router image that predates them fails.
+#
 # Usage: hack/verify-router-metrics.sh <run-namespace> [router-pod]
 #   OPERATOR_NAMESPACE  namespace the operator runs in (default: agent-orca-system)
 #   IMAGE               image with wget (default: busybox:1.36)
@@ -16,6 +20,8 @@ RUN_NS="${1:?usage: $0 <run-namespace> [router-pod]}"
 POD="${2:-}"
 OP_NS="${OPERATOR_NAMESPACE:-agent-orca-system}"
 IMAGE="${IMAGE:-busybox:1.36}"
+# A series every current router exports from its first scrape.
+REQUIRED_SERIES="agentorca_modelrouter_telemetry_events_dropped_total"
 
 if [[ -z "$POD" ]]; then
   # A running pod that has a model-router container (sidecar or split-pod router).
@@ -32,7 +38,7 @@ probe() { # probe <name> <extra labels...>
   local name="$1"; shift
   kubectl -n "$OP_NS" delete pod "$name" --ignore-not-found --wait=true >/dev/null
   kubectl -n "$OP_NS" run "$name" --restart=Never --image="$IMAGE" --labels="$(IFS=,; echo "$*")" \
-    --command -- wget -q -T 5 -O - "http://$IP:9091/metrics" >/dev/null
+    --command -- sh -c "wget -q -T 5 -O - http://$IP:9091/metrics | grep -q '^$REQUIRED_SERIES'" >/dev/null
   local phase=""
   for _ in $(seq 1 40); do
     phase="$(kubectl -n "$OP_NS" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
@@ -48,7 +54,7 @@ trap 'kubectl -n "$OP_NS" delete pod verify-router-allowed verify-router-denied 
 allowed="$(probe verify-router-allowed app.kubernetes.io/name=agent-orca app.kubernetes.io/component=operator)"
 denied="$(probe verify-router-denied app=unrelated)"
 
-echo "operator-labelled pod -> :9091: $allowed (want Succeeded)"
+echo "operator-labelled pod -> :9091 with routing telemetry series: $allowed (want Succeeded)"
 echo "unlabelled pod        -> :9091: $denied (want Failed)"
 [[ "$allowed" == Succeeded && "$denied" == Failed ]] || { echo "FAIL" >&2; exit 1; }
 echo "OK"

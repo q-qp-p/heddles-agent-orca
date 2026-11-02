@@ -123,9 +123,12 @@ func TestArchiveRunBindsCostCapture(t *testing.T) {
 			for i := range args {
 				args[i] = sqlmock.AnyArg()
 			}
+			mock.ExpectBegin()
 			mock.ExpectExec(`INSERT INTO archived_runs`).
 				WithArgs(append(args, tc.want)...).
 				WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectExec(`INSERT INTO run_outcomes`).WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectCommit()
 			if err := s.ArchiveRun(context.Background(), run, nil); err != nil {
 				t.Fatal(err)
 			}

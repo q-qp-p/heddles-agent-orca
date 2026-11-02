@@ -74,7 +74,8 @@ type Router struct {
 	auth              *Authenticator
 	ruleRouter        *RuleRouter
 	metaRouter        *MetaRouter
-	selector          Selector // picks the provider for each call; see selectorOrDefault
+	selector          Selector       // picks the provider for each call; see selectorOrDefault
+	telemetry         *telemetrySink // routing telemetry to the operator; nil when no operator API is configured
 	store             state.Store
 	priorMessages     []Message       // conversation history before the current turn (checkpoint + folded turns)
 	messages          []Message       // the current turn: client input, assistant replies, tool results
@@ -256,6 +257,9 @@ func New(cfg *Config, store state.Store, initialMessages []json.RawMessage, exec
 		liveBufferTokens: 0,
 	}
 
+	if cfg.RunName != "" && cfg.OperatorAPIURL != "" {
+		r.telemetry = newTelemetrySink(r.postRoutingEvents, nil)
+	}
 	if metaRouter != nil {
 		metaRouter.forward = func(ctx context.Context, provider *ProviderConfig, req ChatCompletionRequest) ([]byte, error) {
 			return r.forwardToProviderWithin(ctx, provider, req, metaRouterTimeout)
@@ -291,6 +295,7 @@ func (r *Router) SetMetrics(m *Metrics) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.metrics = m
+	r.telemetry.setMetrics(m)
 	r.initSpendSeriesLocked()
 }
 
@@ -970,6 +975,7 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 
 	// Record the actual per-request routing decision so the UI shows the model that ran.
 	go r.postRoutingDecision(provider, sel, "")
+	ct := r.beginCall(sel, provider, "")
 	// Trace-stream copy for ACP/editor clients that never poll the AgentRun CRD.
 	// Emitted synchronously BEFORE the LLM call so the editor shows which model
 	// was selected while it works, not after the turn completes.
@@ -1018,6 +1024,14 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 			r.recordProviderError(provider)
 		}
 		r.emitTraceEventBoth(fmt.Sprintf(`{"type":"providerFallback","from":%q,"to":"","reason":%q}`, primaryName, err.Error()))
+		// The failed attempt is an event of its own: it explains the fallback
+		// that follows and is what a flaky provider's error rate is made of.
+		if fitErr != nil {
+			ct.setError(errClassRequestTooBig)
+		} else {
+			ct.setError(classifyProviderError(err))
+		}
+		ct.finish()
 		origReq.StreamOptions = chatReq.StreamOptions
 		resp, provider, fit, err = r.tryFallbackStream(req.Context(), origReq, primaryName)
 		chatReq = fit.req
@@ -1049,7 +1063,10 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 		fallbackSel.DecisionID = newDecisionID()
 		fallbackSel.Path = pathFallback
 		fallbackSel.Reason = "fallback from " + primaryName
+		fallbackSel.AuxUsage = nil // the selector's own cost belongs to the first attempt
 		go r.postRoutingDecision(provider, fallbackSel, sel.DecisionID)
+		ct = r.beginCall(fallbackSel, provider, primaryName)
+		ct.ev.ParentDecisionID = sel.DecisionID
 	}
 	// Tell trace-stream clients the turn was compacted before sending —
 	// without it a silently-shortened conversation looks like memory loss.
@@ -1059,6 +1076,7 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 	if !isContinuation {
 		req = req.WithContext(context.WithValue(req.Context(), turnInputKey{}, turnInput))
 	}
+	req = req.WithContext(context.WithValue(req.Context(), callTelemetryKey{}, ct))
 	r.handleStreamingResponse(w, req, provider, resp, chatReq)
 	// Checkpoint periodically for crash recovery.
 	if r.cfg.CheckpointEvery > 0 && r.ruleRouter.TurnCount()%r.cfg.CheckpointEvery == 0 {
@@ -2122,6 +2140,9 @@ func (r *Router) announceHindsightBank() {
 // _done — the run completed normally. If zero turns were served, the pod
 // was killed before any work happened — emit a terminal event and exit.
 func (r *Router) Finalize() {
+	// Routing telemetry queued by the last calls must reach the operator before
+	// the pod goes, whatever state the run ended in.
+	defer r.flushTelemetry()
 	r.mu.Lock()
 	alreadyTerminal := r.doneExplicit || r.failedExplicit || r.loopDetected || r.handedOff || r.waitingForInput
 	r.mu.Unlock()

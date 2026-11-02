@@ -181,6 +181,7 @@ func TestArchiveRunWritesTraceEvents(t *testing.T) {
 	traceEvents := json.RawMessage(`[{"id":0,"event":{"type":"token","content":"hi"},"ts":"2026-01-01T00:00:00Z"}]`)
 
 	// Expect the INSERT with trace_events ($23) bound before created_at ($24/$25).
+	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO archived_runs`).
 		WithArgs(
 			"default/test-run", "test-run", "default", sqlmock.AnyArg(),
@@ -191,6 +192,8 @@ func TestArchiveRunWritesTraceEvents(t *testing.T) {
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), "",
 		).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO run_outcomes`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 
 	s := &Store{db: db}
 	if err := s.ArchiveRun(context.Background(), run, traceEvents); err != nil {
@@ -221,6 +224,7 @@ func TestArchiveRunNilTraceEventsPreservesColumn(t *testing.T) {
 
 	// All args as AnyArg — the focus here is that the Exec succeeds with nil
 	// traceEventsJSON (the CASE in the UPSERT SQL handles the preservation).
+	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO archived_runs`).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
@@ -230,6 +234,8 @@ func TestArchiveRunNilTraceEventsPreservesColumn(t *testing.T) {
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO run_outcomes`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 
 	s := &Store{db: db}
 	if err := s.ArchiveRun(context.Background(), run, nil); err != nil {

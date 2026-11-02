@@ -42,6 +42,43 @@ controller-runtime manager metrics on `:8443`.
 | `agentorca_egress_published_total` | Counter | `sink_type` | Successfully published results to egress sinks |
 | `agentorca_egress_failed_total` | Counter | `sink_type` | Failed egress publishes |
 
+### Model-router metrics
+
+Each run's model-router serves these on `:9091` (see [Reaching agent-pod metrics
+behind the NetworkPolicy](#reaching-agent-pod-metrics-behind-the-networkpolicy)).
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `agentorca_modelrouter_spend_usd_total` | Counter | `namespace`, `run`, `provider`, `model`, `outcome` | USD spent on LLM calls, by how the call ended |
+| `agentorca_modelrouter_llm_tokens_total` | Counter | `direction` (`prompt`/`completion`), `provider` | Tokens providers reported (the billed figures) |
+| `agentorca_modelrouter_llm_latency_seconds` | Histogram | `provider` | Routing a call to the end of its response stream |
+| `agentorca_modelrouter_llm_ttft_seconds` | Histogram | `provider` | Routing a call to its first token |
+| `agentorca_modelrouter_llm_errors_total` | Counter | `provider`, `class` | Failed calls (`rate_limited`, `provider_5xx`, `provider_4xx`, `timeout`, `request_too_large`, `cancelled`, `stream_interrupted`, `provider_error`) |
+| `agentorca_modelrouter_routing_decisions_total` | Counter | `strategy`, `path`, `stage` | Selections, by the rule or meta-router path that made them and the task stage. Capability rules report as `rule:capability` |
+| `agentorca_modelrouter_routing_fallbacks_total` | Counter | `from`, `to` | Calls served by a fallback after another provider failed |
+| `agentorca_modelrouter_tool_calls_total` | Counter | | Tool calls the router dispatched |
+| `agentorca_modelrouter_stream_duration_seconds` | Histogram | | Duration of a streaming chat response |
+| `agentorca_modelrouter_telemetry_events_dropped_total` | Counter | | Routing events dropped because the operator was unreachable and the queue was full |
+| `agentorca_modelrouter_tokens_total` | Counter | | Streamed output **bytes**, a live gauge for the UI; use `llm_tokens_total` for real token counts |
+
+### Routing telemetry
+
+With PostgreSQL configured, every LLM call a router makes also becomes a row in
+`routing_events`: the provider and the deciding path, the task stage, tokens,
+cost, latency and time to first token, any fallback or error, and how its tool
+calls went. It holds metadata only, never prompts or responses. Each run's outcome
+(phase, failure class, turns, cost, tool-approval rejections) is written to
+`run_outcomes` when the run is archived. Later routing work reads these tables to
+judge whether a routing choice was worth its cost.
+
+- Rows older than `--routing-events-retention` (default `720h`, `0` keeps them) are
+  deleted by the operator.
+- Without PostgreSQL the operator acknowledges and drops posted events; the metrics
+  above still work, and a run's page shows the latest 100 routing decisions kept in
+  `status.routingDecisions`.
+- `GET /api/runs/{namespace}/{name}/routing-events` returns a run's full history,
+  oldest first (the run page's "Load full history").
+
 ### Controller metrics
 
 The controller-runtime manager exposes additional metrics on `:8080` in the

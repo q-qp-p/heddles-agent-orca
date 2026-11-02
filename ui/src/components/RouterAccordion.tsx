@@ -3,13 +3,37 @@ import { useState } from 'react'
 import type { RoutingDecisionInfo } from '../api/sse'
 import { DESIGN } from '../lib/designSystem'
 import { Icon, ICON } from '../lib/icons'
+import { DSButton } from '../lib/primitives'
 
 interface Props {
   decisions: RoutingDecisionInfo[]
+  /** Every decision the run made. When it exceeds `decisions.length` the list is
+   *  the latest window only and the full history can be loaded. */
+  total?: number
+  /** Loads the run's full decision history; rejects when it is unavailable. */
+  loadAll?: () => Promise<RoutingDecisionInfo[]>
 }
 
-export function RouterAccordion({ decisions }: Props) {
+export function RouterAccordion({ decisions: latest, total, loadAll }: Props) {
   const [open, setOpen] = useState(false)
+  const [full, setFull] = useState<RoutingDecisionInfo[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const decisions = full ?? latest
+  const truncated = full === null && total !== undefined && total > latest.length
+
+  const showAll = async () => {
+    if (!loadAll) return
+    setLoading(true)
+    setFailed(false)
+    try {
+      setFull(await loadAll())
+    } catch {
+      setFailed(true)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // The controller pre-populates decisions with all configured providers
   // (reason starts with "configured provider"). The model-router then appends
@@ -38,6 +62,19 @@ export function RouterAccordion({ decisions }: Props) {
       </button>
       {open && (
         <div id="router-body" role="region" style={s.body}>
+          {truncated && (
+            <div style={s.truncated} role="status">
+              <span>
+                Showing the latest {latest.length} of {total} decisions.
+                {failed && ' The full history is not available.'}
+              </span>
+              {loadAll && !failed && (
+                <DSButton size="sm" onClick={showAll} disabled={loading}>
+                  {loading ? 'Loading…' : 'Load full history'}
+                </DSButton>
+              )}
+            </div>
+          )}
           {decisions.length === 0 ? (
             <div style={s.empty}>No routing decisions recorded.</div>
           ) : (
@@ -136,6 +173,15 @@ const s: Record<string, React.CSSProperties> = {
     flex: 1,
     overflowY: 'auto',
     minHeight: 0,
+  },
+  truncated: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+    fontSize: 11,
+    color: 'var(--ds-text-secondary)',
   },
   empty: {
     color: 'var(--ds-text-muted)',

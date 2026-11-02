@@ -87,6 +87,8 @@ type UIServer struct {
 	approvals approvalStore
 	// costArchive overrides the archive read by /api/costs (tests); nil means pgStore.
 	costArchive costArchive
+	// routingReader overrides pgStore for routing telemetry reads (tests).
+	routingReader routingEventReader
 	// routerMetricsURLFor builds a model-router metrics URL from a pod IP (tests);
 	// nil means http://<ip>:9091/metrics.
 	routerMetricsURLFor func(podIP string) string
@@ -346,6 +348,8 @@ func (s *UIServer) handleRunOrStream(w http.ResponseWriter, r *http.Request) {
 		switch parts[2] {
 		case string(ACPRunModeStream):
 			s.handleStream(w, r, ns, runName)
+		case "routing-events":
+			s.handleRunRoutingEvents(w, r, ns, runName)
 		case "stop":
 			s.handleStopRun(w, r, ns, runName)
 		case "answer":
@@ -363,46 +367,49 @@ func (s *UIServer) handleRunOrStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type runDetail struct {
-		Name               string                `json:"name"`
-		Namespace          string                `json:"namespace"`
-		AgentRef           string                `json:"agentRef"`
-		Input              string                `json:"input"`
-		Phase              string                `json:"phase"`
-		Output             string                `json:"output,omitempty"`
-		SpendUSD           string                `json:"spendUSD"`
-		RestartCount       int                   `json:"restartCount"`
-		LastRestartReason  string                `json:"lastRestartReason,omitempty"`
-		StartTime          string                `json:"startTime,omitempty"`
-		CompletionTime     string                `json:"completionTime,omitempty"`
-		RoutingDecisions   []routingDecisionJSON `json:"routingDecisions"`
-		ChildRunRefs       []string              `json:"childRunRefs,omitempty"`
-		ParentRunRef       string                `json:"parentRunRef,omitempty"`
-		ClarifyQuestion    string                `json:"clarifyQuestion,omitempty"`
-		ClarifyAnswer      string                `json:"clarifyAnswer,omitempty"`
-		WaitingSince       string                `json:"waitingSince,omitempty"`
-		ContinuationRunRef string                `json:"continuationRunRef,omitempty"`
-		ContextUsedTokens  int                   `json:"contextUsedTokens"`
-		MaxContextTokens   int                   `json:"maxContextTokens"`
+		Name              string                `json:"name"`
+		Namespace         string                `json:"namespace"`
+		AgentRef          string                `json:"agentRef"`
+		Input             string                `json:"input"`
+		Phase             string                `json:"phase"`
+		Output            string                `json:"output,omitempty"`
+		SpendUSD          string                `json:"spendUSD"`
+		RestartCount      int                   `json:"restartCount"`
+		LastRestartReason string                `json:"lastRestartReason,omitempty"`
+		StartTime         string                `json:"startTime,omitempty"`
+		CompletionTime    string                `json:"completionTime,omitempty"`
+		RoutingDecisions  []routingDecisionJSON `json:"routingDecisions"`
+		// RoutingDecisionsTotal counts every decision; status holds only the latest.
+		RoutingDecisionsTotal int      `json:"routingDecisionsTotal,omitempty"`
+		ChildRunRefs          []string `json:"childRunRefs,omitempty"`
+		ParentRunRef          string   `json:"parentRunRef,omitempty"`
+		ClarifyQuestion       string   `json:"clarifyQuestion,omitempty"`
+		ClarifyAnswer         string   `json:"clarifyAnswer,omitempty"`
+		WaitingSince          string   `json:"waitingSince,omitempty"`
+		ContinuationRunRef    string   `json:"continuationRunRef,omitempty"`
+		ContextUsedTokens     int      `json:"contextUsedTokens"`
+		MaxContextTokens      int      `json:"maxContextTokens"`
 	}
 
 	detail := runDetail{
-		Name:               run.Name,
-		Namespace:          run.Namespace,
-		AgentRef:           run.Spec.AgentRef,
-		Input:              run.Spec.Input,
-		Phase:              string(run.Status.Phase),
-		Output:             run.Status.Output,
-		SpendUSD:           run.Status.SpendUSD,
-		RestartCount:       run.Status.RestartCount,
-		LastRestartReason:  run.Status.LastRestartReason,
-		RoutingDecisions:   make([]routingDecisionJSON, 0, len(run.Status.RoutingDecisions)),
-		ChildRunRefs:       run.Status.ChildRunRefs,
-		ParentRunRef:       run.Spec.ParentRunRef,
-		ClarifyQuestion:    run.Status.ClarifyQuestion,
-		ClarifyAnswer:      run.Status.ClarifyAnswer,
-		ContinuationRunRef: run.Status.ContinuationRunRef,
-		ContextUsedTokens:  run.Status.ContextUsedTokens,
-		MaxContextTokens:   run.Status.MaxContextTokens,
+		Name:                  run.Name,
+		Namespace:             run.Namespace,
+		AgentRef:              run.Spec.AgentRef,
+		Input:                 run.Spec.Input,
+		Phase:                 string(run.Status.Phase),
+		Output:                run.Status.Output,
+		SpendUSD:              run.Status.SpendUSD,
+		RestartCount:          run.Status.RestartCount,
+		LastRestartReason:     run.Status.LastRestartReason,
+		RoutingDecisions:      make([]routingDecisionJSON, 0, len(run.Status.RoutingDecisions)),
+		RoutingDecisionsTotal: run.Status.RoutingDecisionsTotal,
+		ChildRunRefs:          run.Status.ChildRunRefs,
+		ParentRunRef:          run.Spec.ParentRunRef,
+		ClarifyQuestion:       run.Status.ClarifyQuestion,
+		ClarifyAnswer:         run.Status.ClarifyAnswer,
+		ContinuationRunRef:    run.Status.ContinuationRunRef,
+		ContextUsedTokens:     run.Status.ContextUsedTokens,
+		MaxContextTokens:      run.Status.MaxContextTokens,
 	}
 	if run.Status.WaitingSince != nil {
 		detail.WaitingSince = run.Status.WaitingSince.UTC().Format(time.RFC3339)

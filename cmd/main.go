@@ -45,6 +45,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -85,6 +86,9 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	var routingEventsRetention time.Duration
+	flag.DurationVar(&routingEventsRetention, "routing-events-retention", 30*24*time.Hour,
+		"How long routing telemetry (one row per LLM call) is kept in PostgreSQL. 0 keeps it forever.")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -588,6 +592,14 @@ func main() {
 			notifier = approvalNotifier
 		}
 		internalAPI.WithApprovals(pgStore, notifier)
+		// Routing telemetry: one row per LLM call, posted by each run's router.
+		internalAPI.WithRoutingStore(pgStore)
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			return pgStore.RunRoutingEventsRetention(ctx, routingEventsRetention, postgresql.RoutingEventsRetentionInterval)
+		})); err != nil {
+			setupLog.Error(err, "Unable to schedule routing telemetry retention")
+			os.Exit(1)
+		}
 	}
 	// Filesystem relay (issue #34): carries ACP fs/* requests from agent pods to
 	// the workstation-side bridge. Requires the redis-backed shared state; with

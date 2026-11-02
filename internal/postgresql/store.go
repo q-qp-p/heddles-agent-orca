@@ -213,7 +213,14 @@ func (s *Store) ArchiveRun(ctx context.Context, run *agentorcav1alpha1.AgentRun,
 			updated_at = EXCLUDED.updated_at
 	`
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, q,
+	// The archive row and the run's outcome land together: an outcome without
+	// its run (or the reverse) would skew the routing analysis that joins them.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("archiving run %s: %w", archived.ID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, q,
 		archived.ID, archived.Name, archived.Namespace, labelsJSON,
 		archived.AgentRef, archived.Input, archived.ParentRunRef,
 		archived.PriorRunRef, archived.TimeoutSec, archived.Phase,
@@ -224,6 +231,12 @@ func (s *Store) ArchiveRun(ctx context.Context, run *agentorcav1alpha1.AgentRun,
 		archived.TraceEventsJSON, now, now, archived.CostCapture,
 	)
 	if err != nil {
+		return fmt.Errorf("archiving run %s: %w", archived.ID, err)
+	}
+	if err := upsertRunOutcome(ctx, tx, run, archived); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("archiving run %s: %w", archived.ID, err)
 	}
 	slog.Debug("archived run to PostgreSQL", "run", archived.ID, "phase", archived.Phase)

@@ -282,6 +282,11 @@ func (r *Router) forwardToAnthropicStream(ctx context.Context, provider *Provide
 // accumulating the full message for conversation history tracking.
 func (r *Router) handleStreamingResponse(w http.ResponseWriter, req *http.Request, provider *ProviderConfig, resp *http.Response, chatReq ChatCompletionRequest) { //nolint:gocyclo
 
+	// The call's telemetry event is recorded when this returns, whichever way it
+	// ends; the tool-call recursion below finishes its own event first.
+	ct := callTelemetryFrom(req.Context())
+	defer ct.finish()
+
 	tokenStreamKey := "tokens:" + r.cfg.RunNamespace + ":" + r.cfg.RunName
 	slog.Info("streaming response started", "provider", provider.Name, "tokenStreamKey", tokenStreamKey, "storeType", fmt.Sprintf("%T", r.store))
 
@@ -384,6 +389,9 @@ func (r *Router) handleStreamingResponse(w http.ResponseWriter, req *http.Reques
 				for _, choice := range chunk.Choices {
 					// Reasoning in this chunk precedes its content and tool calls.
 					thought.WriteString(choice.Delta.Reasoning)
+					if choice.Delta.Reasoning != "" || choice.Delta.Content != "" || len(choice.Delta.ToolCalls) > 0 {
+						ct.noteFirstToken()
+					}
 					// Some providers send an empty finish_reason on every chunk; only a
 					// real one ends the thinking block.
 					if choice.Delta.Content != "" || len(choice.Delta.ToolCalls) > 0 || (choice.FinishReason != nil && *choice.FinishReason != "") {
@@ -446,6 +454,13 @@ func (r *Router) handleStreamingResponse(w http.ResponseWriter, req *http.Reques
 	if usage.PromptTokens == 0 && usage.CompletionTokens == 0 &&
 		(spendOutcome == spendOutcomeStreamInterrupted || r.cancelCtx.Err() != nil) {
 		usage = estimateInterruptedUsage(chatReq.Messages, partial)
+	}
+	ct.noteStreamEnd(usage, finishReason)
+	switch {
+	case r.cancelCtx.Err() != nil:
+		ct.setError(errClassCancelled)
+	case spendOutcome == spendOutcomeStreamInterrupted:
+		ct.setError(errClassStreamBroken)
 	}
 
 	// If the run was cancelled, the OpenAI turn loop never saw a terminal finish
@@ -618,6 +633,7 @@ func (r *Router) handleStreamingResponse(w http.ResponseWriter, req *http.Reques
 			trip := r.recordToolCallLocked(tc)
 			r.mu.Unlock()
 			if trip != nil {
+				ct.setSafeguardTrip(trip.Reason)
 				r.tripSafeguard(*trip)
 				writeSafeguardHalt(w, flusher, *trip)
 				return
@@ -627,6 +643,8 @@ func (r *Router) handleStreamingResponse(w http.ResponseWriter, req *http.Reques
 				continue
 			}
 			result := r.dispatchToolCall(req.Context(), tc)
+			ct.noteToolResult(result)
+			r.metrics.IncToolCall()
 
 			// Stream tool call delta to client, unless it runs its own tools:
 			// it would take the router's call for one of its own.

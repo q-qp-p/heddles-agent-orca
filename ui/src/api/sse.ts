@@ -51,6 +51,36 @@ export async function getRun(runId: string, namespace: string): Promise<AgentRun
   return res.json()
 }
 
+/** Fetch every LLM call a run made, oldest first. AgentRun status keeps only the
+ *  latest routing decisions, so this is the full history of a long run. Rejects
+ *  when the operator has no PostgreSQL store (HTTP 503). */
+export async function getRunRoutingEvents(runId: string, namespace: string): Promise<RoutingEventInfo[]> {
+  const res = await apiFetch(`/api/runs/${encodeURIComponent(namespace)}/${encodeURIComponent(runId)}/routing-events`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const body = (await res.json()) as { events?: RoutingEventInfo[] }
+  return body.events ?? []
+}
+
+/** Shows a routing event in the decision list the router accordion renders. */
+export function routingEventToDecision(e: RoutingEventInfo): RoutingDecisionInfo {
+  const reason = e.fallbackFrom
+    ? `fallback from ${e.fallbackFrom}`
+    : e.errorClass
+      ? `${e.path ?? 'call'} (${e.errorClass})`
+      : (e.path ?? '')
+  return {
+    model: e.model ?? e.provider,
+    provider: e.provider,
+    strategy: e.strategy ?? '',
+    reason,
+    confidence: String(e.confidence ?? 0),
+    timestamp: e.createdAt,
+    decisionID: e.decisionID,
+    path: e.path,
+    category: e.stage,
+  }
+}
+
 /** Fetch all Agents across all namespaces. */
 export async function listAgents(namespace = ''): Promise<AgentSummary[]> {
   const res = await apiFetch(`/api/agents?namespace=${namespace}`)
@@ -229,6 +259,35 @@ export interface RoutingDecisionInfo {
   reason: string
   confidence: string
   timestamp?: string
+  /** Identifies the decision across traces, status and routing telemetry. */
+  decisionID?: string
+  /** What decided: a rule path, `meta`, `meta-cache` or `fallback`. */
+  path?: string
+  /** The task stage the request was classified as. */
+  category?: string
+}
+
+/** One LLM call from routing telemetry (`GET /api/runs/{ns}/{name}/routing-events`). */
+export interface RoutingEventInfo {
+  decisionID: string
+  parentDecisionID?: string
+  provider: string
+  model?: string
+  strategy?: string
+  path?: string
+  stage?: string
+  confidence?: number
+  promptTokens?: number
+  completionTokens?: number
+  costUSD?: number
+  latencyMS?: number
+  ttftMS?: number
+  finishReason?: string
+  fallbackFrom?: string
+  errorClass?: string
+  toolCalls?: number
+  toolErrors?: number
+  createdAt?: string
 }
 
 export interface AgentRunDetail {
@@ -244,6 +303,8 @@ export interface AgentRunDetail {
   startTime?: string
   completionTime?: string
   routingDecisions: RoutingDecisionInfo[]
+  /** Every decision recorded; `routingDecisions` holds only the latest ones. */
+  routingDecisionsTotal?: number
   /** Child AgentRun names spawned by this run via the agent-as-tool pattern. */
   childRunRefs?: string[]
   /** Parent AgentRun name, if this run was spawned as a child. */

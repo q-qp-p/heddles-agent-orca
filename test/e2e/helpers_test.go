@@ -41,6 +41,11 @@ import (
 // These also require a valid LLM provider credential to get token responses.
 func streamingE2E() bool { return os.Getenv("STREAMING_E2E") == "true" }
 
+// routingE2E returns true when the routing telemetry specs should run. They
+// deploy their own PostgreSQL and a deterministic fake LLM (test/fakellm), so
+// they need no credentials.
+func routingE2E() bool { return os.Getenv("ROUTING_E2E") == "true" }
+
 // --- CRD readiness ---
 
 // waitForCRDReady blocks until the named CRD exists, has no deletionTimestamp,

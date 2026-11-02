@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Provider selection moved behind a `Selector` interface in `internal/router`; the existing
   rule and meta-router logic is its first implementation. `internal/router/testdata/routing`
   holds golden routing fixtures (`go test ./internal/router -run TestRoutingGolden -update`).
+- **Routing telemetry** — with PostgreSQL configured, every LLM call becomes a
+  `routing_events` row (provider, deciding path, task stage, tokens, cost, latency, time to
+  first token, fallback/error, tool-call outcomes; metadata only), and a run's outcome is
+  recorded in `run_outcomes` when it is archived. Rows are kept for
+  `--routing-events-retention` (default 720h). The run page can load the full decision
+  history (`GET /api/runs/{ns}/{name}/routing-events`) when `status.routingDecisions`, now
+  capped at the latest 100, is only a window. New router metrics: `llm_tokens_total`,
+  `llm_latency_seconds`, `llm_ttft_seconds`, `llm_errors_total`, `routing_decisions_total`,
+  `routing_fallbacks_total`, `telemetry_events_dropped_total`; `tool_calls_total` and
+  `stream_duration_seconds`, defined but never recorded before, now are. See
+  `docs/observability.md`.
+- **Routing e2e harness** — `test/fakellm`, a deterministic OpenAI-compatible server for tests
+  (scripted failures, latency, tool calls, judge verdicts), and a path-filtered
+  `E2E Routing Tests` workflow that runs the routing telemetry specs (`ROUTING_E2E=true`,
+  `E2E_LABEL` selects specs) against a Kind cluster with PostgreSQL.
 - **Hindsight API-key authentication** (`hindsight.apiKeySecret` chart value, fixes the
   application-level half of #58) — the model-router sends
   `Authorization: Bearer <key>` on hindsight bank/recall/retain calls so hindsight can

@@ -40,6 +40,9 @@ func (s *stubSelector) Select(_ context.Context, in SelectionInput) (Selection, 
 }
 func (s *stubSelector) Close() error { return nil }
 
+// providerPrimary names the failing provider in the fallback fixtures.
+const providerPrimary = "primary"
+
 func newSelectionTestRouter(t *testing.T, mutate func(*Config)) *Router {
 	t.Helper()
 	keyFile := writeKeyFile(t)
@@ -243,9 +246,9 @@ func TestHandleChatCompletions_FallbackPostsLinkedDecision(t *testing.T) {
 	r := newSelectionTestRouter(t, func(c *Config) {
 		c.OperatorAPIURL = rec.srv.URL
 		c.Strategy = strategyRuleBased
-		c.FallbackChain = []string{"primary", "fallback"}
+		c.FallbackChain = []string{providerPrimary, "fallback"}
 		c.Providers = []ProviderConfig{
-			{Name: "primary", LiteLLMModel: "openai/p", BaseURL: failing.srv.URL, APIKeyFile: c.SATokenFile, Weight: 1},
+			{Name: providerPrimary, LiteLLMModel: "openai/p", BaseURL: failing.srv.URL, APIKeyFile: c.SATokenFile, Weight: 1},
 			{Name: "fallback", LiteLLMModel: "openai/f", BaseURL: working.srv.URL, APIKeyFile: c.SATokenFile, Weight: 0},
 		}
 	})
@@ -268,7 +271,7 @@ func TestHandleChatCompletions_FallbackPostsLinkedDecision(t *testing.T) {
 	if primary == nil || fallback == nil {
 		t.Fatalf("decisions = %v, want one fallback-path decision and one other", got)
 	}
-	if primary["provider"] != "primary" || fallback["provider"] != "fallback" {
+	if primary["provider"] != providerPrimary || fallback["provider"] != "fallback" {
 		t.Errorf("providers = %q / %q", primary["provider"], fallback["provider"])
 	}
 	if fallback["parentDecisionID"] != primary["decisionID"] || fallback["decisionID"] == primary["decisionID"] {

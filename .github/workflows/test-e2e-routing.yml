@@ -1,0 +1,54 @@
+name: E2E Routing Tests
+
+# Runs the routing telemetry specs (fake LLM + PostgreSQL in Kind). They are slow
+# and only exercise routing, so pull requests run them when routing code changes;
+# every push to main runs them regardless.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'internal/router/**'
+      - 'internal/apiserver/**'
+      - 'internal/postgresql/**'
+      - 'internal/controller/agentrun_controller.go'
+      - 'internal/controller/agentdeployment_controller.go'
+      - 'internal/controller/*model*'
+      - 'internal/controller/*routing*'
+      - 'api/**'
+      - 'cmd/**'
+      - 'test/e2e/**'
+      - 'test/fakellm/**'
+      - 'third_party/switchyard/**'
+      - 'Dockerfile*'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/test-e2e-routing.yml'
+
+jobs:
+  test-e2e-routing:
+    name: Routing e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install the latest version of kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Running routing e2e
+        env:
+          ROUTING_E2E: 'true'
+          E2E_LABEL: routing-e2e
+        run: |
+          go mod tidy
+          make test-e2e

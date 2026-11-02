@@ -65,6 +65,9 @@ type Server struct {
 	approvals ToolApprovalStore
 	// approvalNotifier tells approvers about new requests. Optional.
 	approvalNotifier ApprovalNotifier
+	// routingEvents stores routing telemetry (routing_events_api.go). nil drops
+	// posted events.
+	routingEvents RoutingEventStore
 }
 
 // New creates a new API server.
@@ -140,6 +143,8 @@ func (s *Server) handleAgentRun(w http.ResponseWriter, r *http.Request) { //noli
 		s.emitEventAgentRun(w, r, namespace, parts[1])
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "route":
 		s.recordRoutingDecision(w, r, namespace, parts[1])
+	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "routing-events":
+		s.recordRoutingEvents(w, r, caller, namespace, parts[1])
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "fs":
 		s.enqueueFSRequest(w, r, namespace, parts[1])
 	case r.Method == http.MethodGet && len(parts) == 4 && parts[2] == "fs":

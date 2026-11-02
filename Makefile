@@ -166,13 +166,17 @@ setup-test-e2e: ## Set up a fresh Kind cluster for e2e tests (deletes existing c
 # Test tiers (controlled by env vars):
 #   default             operator + webhook tests (manager)
 #   STREAMING_E2E=true  + SSE token streaming tests (needs LLM credentials)
+#   ROUTING_E2E=true    + routing telemetry tests (deploys PostgreSQL and a fake LLM; no credentials)
+# E2E_LABEL narrows the run to specs carrying a Ginkgo label, e.g. routing-e2e.
 #
 # Examples:
 #   make test-e2e
 #   STREAMING_E2E=true make test-e2e
+#   ROUTING_E2E=true E2E_LABEL=routing-e2e make test-e2e
+E2E_LABEL ?=
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e suite
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) ROUTER_IMG=$(ROUTER_IMG) STREAMING_E2E=$(STREAMING_E2E) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) ROUTER_IMG=$(ROUTER_IMG) STREAMING_E2E=$(STREAMING_E2E) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter='$(E2E_LABEL)'
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: lint-demos
