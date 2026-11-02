@@ -4258,6 +4258,21 @@ type TokenUsage struct {
 
 // --- Format translation helpers ---
 
+// anthropicTokenCount reads one token counter from an Anthropic usage object.
+func anthropicTokenCount(usage map[string]any, key string) int {
+	n, _ := usage[key].(float64)
+	return int(n)
+}
+
+// anthropicPromptTokens is the whole request as OpenAI counts prompt_tokens:
+// Anthropic reports uncached input apart from cache writes and cache reads, so
+// all three add up. Reading input_tokens alone undercounts every cached call.
+func anthropicPromptTokens(usage map[string]any) int {
+	return anthropicTokenCount(usage, "input_tokens") +
+		anthropicTokenCount(usage, "cache_creation_input_tokens") +
+		anthropicTokenCount(usage, "cache_read_input_tokens")
+}
+
 // anthropicToOpenAI converts an Anthropic Messages API response to OpenAI format.
 // Handles both text and tool_use content blocks.
 func anthropicToOpenAI(body []byte) ([]byte, error) {
@@ -4270,11 +4285,8 @@ func anthropicToOpenAI(body []byte) ([]byte, error) {
 			Name  string          `json:"name,omitempty"`
 			Input json.RawMessage `json:"input,omitempty"`
 		} `json:"content"`
-		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
-		StopReason string `json:"stop_reason"`
+		Usage      map[string]any `json:"usage"`
+		StopReason string         `json:"stop_reason"`
 	}
 	if err := json.Unmarshal(body, &anthropicResp); err != nil {
 		return nil, err
@@ -4319,9 +4331,9 @@ func anthropicToOpenAI(body []byte) ([]byte, error) {
 			FinishReason: finishReason,
 		}},
 		Usage: TokenUsage{
-			PromptTokens:     anthropicResp.Usage.InputTokens,
-			CompletionTokens: anthropicResp.Usage.OutputTokens,
-			TotalTokens:      anthropicResp.Usage.InputTokens + anthropicResp.Usage.OutputTokens,
+			PromptTokens:     anthropicPromptTokens(anthropicResp.Usage),
+			CompletionTokens: anthropicTokenCount(anthropicResp.Usage, "output_tokens"),
+			TotalTokens:      anthropicPromptTokens(anthropicResp.Usage) + anthropicTokenCount(anthropicResp.Usage, "output_tokens"),
 		},
 	}
 	return json.Marshal(openAIResp)

@@ -199,6 +199,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Anthropic calls recorded zero prompt tokens** — the streaming translator read only the output
+  count and dropped the input count Anthropic sends in `message_start`, so every Anthropic call
+  showed `prompt_tokens = 0`. Cost, `routing_events` and the context-size accounting that depends on
+  prompt tokens were all too low. Cache writes and cache reads now count toward the prompt as well,
+  in the streaming and non-streaming paths. Cached tokens are priced at the full input rate, so cost
+  for cache-heavy runs is slightly high rather than low.
+
 - **Routing rules that never fired** — the router passed a zero token estimate and no
   timeout to the rule router, so the `maxRequestTokens` filter, the large-context rule and
   the near-timeout rule were dead. They now run. Runs with large conversations, a provider

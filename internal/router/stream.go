@@ -810,6 +810,9 @@ func translateAnthropicSSE(r io.Reader, w io.Writer) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var msgID string
+	// promptTokens is the whole request as Anthropic counts it. message_start
+	// carries it; message_delta repeats it on newer API versions.
+	var promptTokens int
 	// Track the current content block index → tool call index mapping.
 	// Anthropic uses content block index; OpenAI uses tool call index.
 	blockIndexToToolIndex := map[int]int{}
@@ -833,6 +836,9 @@ func translateAnthropicSSE(r io.Reader, w io.Writer) {
 		case "message_start":
 			if msg, ok := event["message"].(map[string]any); ok {
 				msgID, _ = msg["id"].(string)
+				if usage, ok := msg["usage"].(map[string]any); ok {
+					promptTokens = anthropicPromptTokens(usage)
+				}
 			}
 			// Emit initial role chunk.
 			chunk := streamingChatCompletionChunk{
@@ -944,8 +950,13 @@ func translateAnthropicSSE(r io.Reader, w io.Writer) {
 				// Include usage if present.
 				if usage, ok := event["usage"].(map[string]any); ok {
 					outputTokens, _ := usage["output_tokens"].(float64)
+					if n := anthropicPromptTokens(usage); n > 0 {
+						promptTokens = n
+					}
 					chunk.Usage = &TokenUsage{
+						PromptTokens:     promptTokens,
 						CompletionTokens: int(outputTokens),
+						TotalTokens:      promptTokens + int(outputTokens),
 					}
 				}
 				writeSSEChunk(w, chunk)
