@@ -1,0 +1,57 @@
+{
+  "description": "A typed decision service is not served; routing aborts and the rule router decides",
+  "algorithm": {
+    "type": "composite",
+    "classifier": {
+      "target": "judge",
+      "classify_trigger": "user_turn",
+      "fail_open": true,
+      "decision": {
+        "cutoff": 0.5,
+        "candidates": {
+          "a": "strong",
+          "b": "weak"
+        },
+        "evidence": {}
+      }
+    },
+    "stage": {
+      "capable_target": "strong",
+      "efficient_target": "weak",
+      "confidence_threshold": 0.5
+    }
+  },
+  "providers": [
+    {
+      "name": "weak",
+      "weight": 1
+    },
+    {
+      "name": "strong",
+      "weight": 1
+    },
+    {
+      "name": "judge",
+      "weight": 0
+    }
+  ],
+  "capabilityRouting": {
+    "capable": "strong",
+    "efficient": "weak",
+    "judge": "judge"
+  },
+  "history": {
+    "rounds": 0
+  },
+  "judge": {},
+  "expect": {
+    "provider": "weak",
+    "path": "switchyard-failopen",
+    "algorithm": "composite",
+    "label": "",
+    "candidates": [
+      "weak"
+    ],
+    "judgeCalls": 0
+  }
+}

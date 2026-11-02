@@ -109,6 +109,9 @@ type Selection struct {
 	Candidates []string
 	// Strategy is the configured routing strategy.
 	Strategy string
+	// Algorithm names the algorithm that decided, when the strategy has several
+	// (a Switchyard algorithm type); empty for the legacy selector.
+	Algorithm string
 	// Path names what decided: a rule path, "meta" or "meta-cache".
 	Path string
 	// Reason is a human-readable explanation.

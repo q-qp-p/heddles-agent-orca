@@ -1,0 +1,53 @@
+{
+  "description": "The judge scores a bounded task as solvable: efficient model",
+  "algorithm": {
+    "type": "composite",
+    "classifier": {
+      "target": "judge",
+      "base_threshold": 0.5,
+      "classify_trigger": "user_turn",
+      "fail_open": false
+    },
+    "stage": {
+      "capable_target": "strong",
+      "efficient_target": "weak",
+      "confidence_threshold": 0.5
+    }
+  },
+  "providers": [
+    {
+      "name": "weak",
+      "weight": 1
+    },
+    {
+      "name": "strong",
+      "weight": 1
+    },
+    {
+      "name": "judge",
+      "weight": 0
+    }
+  ],
+  "capabilityRouting": {
+    "capable": "strong",
+    "efficient": "weak",
+    "judge": "judge"
+  },
+  "history": {
+    "rounds": 0
+  },
+  "judge": {
+    "score": 0.95
+  },
+  "expect": {
+    "provider": "weak",
+    "path": "switchyard",
+    "algorithm": "composite",
+    "label": "llm-classifier",
+    "candidates": [
+      "weak",
+      "strong"
+    ],
+    "judgeCalls": 1
+  }
+}

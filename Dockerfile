@@ -34,10 +34,11 @@ COPY internal/podbuilder/ internal/podbuilder/
 COPY internal/postgresql/ internal/postgresql/
 COPY internal/rag/*.go internal/rag/
 COPY internal/ratelimit/ internal/ratelimit/
-COPY internal/router/*.go internal/router/
+COPY internal/router/ internal/router/
 COPY internal/security/ internal/security/
 COPY internal/state/ internal/state/
 COPY internal/webhook/ internal/webhook/
+COPY third_party/switchyard/bindings/go/ third_party/switchyard/bindings/go/
 # END generated go-deps
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o bin/manager cmd/main.go

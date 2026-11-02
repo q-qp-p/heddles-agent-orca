@@ -1,0 +1,52 @@
+{
+  "description": "A failing judge (fail_open false) fails the decision; the rule router decides",
+  "algorithm": {
+    "type": "composite",
+    "classifier": {
+      "target": "judge",
+      "base_threshold": 0.5,
+      "classify_trigger": "user_turn",
+      "fail_open": false
+    },
+    "stage": {
+      "capable_target": "strong",
+      "efficient_target": "weak",
+      "confidence_threshold": 0.5
+    }
+  },
+  "providers": [
+    {
+      "name": "weak",
+      "weight": 1
+    },
+    {
+      "name": "strong",
+      "weight": 1
+    },
+    {
+      "name": "judge",
+      "weight": 0
+    }
+  ],
+  "capabilityRouting": {
+    "capable": "strong",
+    "efficient": "weak",
+    "judge": "judge"
+  },
+  "history": {
+    "rounds": 0
+  },
+  "judge": {
+    "error": "judge unavailable"
+  },
+  "expect": {
+    "provider": "weak",
+    "path": "switchyard-failopen",
+    "algorithm": "composite",
+    "label": "",
+    "candidates": [
+      "weak"
+    ],
+    "judgeCalls": 1
+  }
+}

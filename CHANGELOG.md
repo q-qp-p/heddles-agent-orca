@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Switchyard selector in the model-router** — with `strategy: switchyard` in its config, the
+  sidecar routes each call with a Switchyard algorithm (`stage_router`, `llm_classifier`,
+  `composite`, `plan_execute`, `auto`, `random`, `passthrough`, `subagents`): which provider is eligible
+  comes from the selector's `capabilityRouting` roles (`capable`, `efficient`, `judge`), tool
+  side-effect classes seed the stage router's tool semantics, and an LLM judge runs as an ordinary
+  model call charged to the run. The next provider Switchyard ranks becomes the first fallback.
+  It never fails a request: whenever the algorithm cannot decide, the rule router does and the
+  decision is recorded as `switchyard-failopen` with the cause. `MODEL_ROUTER_DISABLE_SWITCHYARD=true`
+  switches it off. A warm pod claimed for another conversation starts with a clean engine (the claim
+  now carries the run's session, parent and workflow step). Not reachable from a ModelSelector until
+  the CRD gains the strategy. See `docs/development.md`.
 - **Switchyard routing binding, vendored** — NVIDIA NeMo Switchyard's Go binding is vendored in
   `third_party/switchyard`, pinned to one upstream commit, with its WebAssembly guest built by
   upstream's script in a digest-pinned Rust image and stored in **Git LFS** (install git-lfs to

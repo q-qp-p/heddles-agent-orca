@@ -71,8 +71,11 @@ type Config struct {
 
 	// Providers is the ordered list of LLM providers resolved from the ModelSelector.
 	Providers []ProviderConfig
-	// Strategy is the routing strategy: "rule-based", "llm-meta", or "hybrid".
+	// Strategy is the routing strategy: "rule-based", "llm-meta", "hybrid" or
+	// "switchyard".
 	Strategy string
+	// Switchyard is the algorithm of the "switchyard" strategy.
+	Switchyard *SwitchyardConfig `json:"switchyard,omitempty"`
 	// CapabilityRouting maps capability tags to provider names.
 	CapabilityRouting map[string]string
 	// FallbackChain is the ordered list of provider names used on 429/5xx.
@@ -480,6 +483,14 @@ type WarmRunInput struct {
 	// Restart marks a re-claim for a run recovering from a pod restart, so
 	// the router drops the original input the agent runtime re-sends.
 	Restart bool `json:"restart,omitempty"`
+	// SessionID is the conversation the run belongs to. A warm pod serves many
+	// runs in turn; a selector that keeps per-session state starts clean when it
+	// changes. Older operators omit it, and the run name stands in.
+	SessionID string `json:"sessionID,omitempty"`
+	// ParentRunName is set for a run spawned by another run.
+	ParentRunName string `json:"parentRunName,omitempty"`
+	// WorkflowStep is the AgentWorkflow step the run executes, if any.
+	WorkflowStep string `json:"workflowStep,omitempty"`
 }
 
 // checkpointKeyForRun is the state-store key of a run's conversation checkpoint.

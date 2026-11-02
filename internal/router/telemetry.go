@@ -359,6 +359,7 @@ func (r *Router) beginCall(sel Selection, provider *ProviderConfig, fallbackFrom
 			Agent:           r.cfg.AgentName,
 			Selector:        r.cfg.SelectorName,
 			Strategy:        r.cfg.Strategy,
+			Algorithm:       sel.Algorithm,
 			Path:            sel.Path,
 			Stage:           sel.Category.Stage,
 			StageConf:       sel.Category.StageConf,

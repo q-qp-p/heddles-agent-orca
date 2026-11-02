@@ -704,16 +704,20 @@ func (r *Router) handleStreamingResponse(w http.ResponseWriter, req *http.Reques
 	go r.notifyOperatorContext()
 }
 
-// tryFallbackStream attempts streaming fallback to providers in the fallback chain.
+// tryFallbackStream attempts streaming fallback to the providers in order, the
+// selection's candidates, or in the configured fallback chain when order is empty.
 func (r *Router) tryFallbackStream(
-	ctx context.Context, origReq ChatCompletionRequest, failedProvider string,
+	ctx context.Context, origReq ChatCompletionRequest, failedProvider string, order []string,
 ) (*http.Response, *ProviderConfig, fittedRequest, error) {
+	if len(order) == 0 {
+		order = r.cfg.FallbackChain
+	}
 	// Each fallback is fitted to its OWN context window from the original
 	// (un-truncated) request: replaying the primary's request verbatim sent
 	// over-window payloads to smaller-window fallbacks, which all answered 400
 	// (#42). A provider the request cannot fit is skipped without a call.
 	skippedForWindow, tried := 0, 0
-	for _, name := range r.cfg.FallbackChain {
+	for _, name := range order {
 		if name == failedProvider {
 			continue
 		}

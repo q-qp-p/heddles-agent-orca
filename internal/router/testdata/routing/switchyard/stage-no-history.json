@@ -1,0 +1,44 @@
+{
+  "description": "A turn with no tool history takes the picker default (efficient)",
+  "algorithm": {
+    "type": "stage_router",
+    "picker": "efficient_first",
+    "capable_target": "strong",
+    "efficient_target": "weak",
+    "confidence_threshold": 0.5
+  },
+  "providers": [
+    {
+      "name": "weak",
+      "weight": 1
+    },
+    {
+      "name": "strong",
+      "weight": 1
+    },
+    {
+      "name": "judge",
+      "weight": 0
+    }
+  ],
+  "capabilityRouting": {
+    "capable": "strong",
+    "efficient": "weak",
+    "judge": "judge"
+  },
+  "history": {
+    "rounds": 0
+  },
+  "judge": {},
+  "expect": {
+    "provider": "weak",
+    "path": "switchyard",
+    "algorithm": "stage_router",
+    "label": "fall_open",
+    "candidates": [
+      "weak",
+      "strong"
+    ],
+    "judgeCalls": 0
+  }
+}

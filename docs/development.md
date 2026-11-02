@@ -148,6 +148,29 @@ to the vendored files (`.github/workflows/switchyard-wasm.yml`). Upstream is fet
 codeload, not `gh api`, which NVIDIA's SAML blocks. After an update, commit the new guest through
 LFS, run `make docker-deps`, and check the guest benchmarks (`go test -bench . ./internal/router/switchyard`).
 
+### How the Sidecar Uses Switchyard
+With `strategy: switchyard` in the router config (`Config.Switchyard.Algorithm`, a Switchyard algorithm
+spec whose targets are ModelProvider names), the sidecar builds a Switchyard engine and asks it which
+provider serves each LLM call. Which providers are eligible comes from the selector's `capabilityRouting`
+roles: `capable`, `efficient` and `judge` name one provider each, and `any` is every provider with a weight.
+`internal/router/switchyard` is the adapter (allowlist, validation, host calls); `selector_switchyard.go` is
+the selector.
+
+- **Served:** `auto`, `stage_router`, `llm_classifier`, `composite`, `plan_execute`, `random`, `passthrough`,
+  `subagents`. An LLM judge is an ordinary non-streaming model call through the router's own forwarders and
+  is charged to the run. **Not served:** `advisor`, `vgr`, `noop` (they answer for the model) and
+  `prefill_router`; typed decision services (`classifier.decision`) abort the decision.
+- **It never fails a request.** If the engine cannot start, the algorithm errors, a judge fails or times
+  out, or something unsupported is asked of it, the rule router decides, and the decision is recorded with
+  path `switchyard-failopen` and the cause in its reason.
+- **Kill switch:** `MODEL_ROUTER_DISABLE_SWITCHYARD=true` on the model-router container routes with the
+  rule router alone.
+- **Session state.** Switchyard keeps holds and escalation latches per session, in memory, per sidecar. A
+  warm pod claimed for another conversation gets a fresh engine (`ClaimRun`); state is not shared
+  between pods, so an escalation does not survive a pod restart.
+- **Cost of a decision:** about 1 ms at 10 messages, 8 ms at 200, 20 ms at 500 (almost all inside the
+  guest), against an LLM call of seconds. The engine adds about 110 MB of peak memory at start.
+
 ## After Making Changes
 
 **After editing `*_types.go` or markers:**

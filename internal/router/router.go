@@ -22,6 +22,7 @@ package router
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -259,6 +260,9 @@ func New(cfg *Config, store state.Store, initialMessages []json.RawMessage, exec
 
 	if cfg.RunName != "" && cfg.OperatorAPIURL != "" {
 		r.telemetry = newTelemetrySink(r.postRoutingEvents, nil)
+	}
+	if cfg.Strategy == strategySwitchyard {
+		r.selector = r.newSwitchyardOrLegacy(r.selector)
 	}
 	if metaRouter != nil {
 		metaRouter.forward = func(ctx context.Context, provider *ProviderConfig, req ChatCompletionRequest) ([]byte, error) {
@@ -1033,7 +1037,7 @@ func (r *Router) HandleChatCompletions(w http.ResponseWriter, req *http.Request)
 		}
 		ct.finish()
 		origReq.StreamOptions = chatReq.StreamOptions
-		resp, provider, fit, err = r.tryFallbackStream(req.Context(), origReq, primaryName)
+		resp, provider, fit, err = r.tryFallbackStream(req.Context(), origReq, primaryName, sel.Candidates)
 		chatReq = fit.req
 		if err != nil {
 			slog.Error("all providers failed (streaming)", "err", err)
@@ -1175,6 +1179,24 @@ func (r *Router) HandleGemini(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(geminiResp)
+}
+
+// newSwitchyardOrLegacy wraps the legacy selector with Switchyard when the
+// strategy asks for it and it can run. The legacy selector always stays behind
+// it: it decides whenever Switchyard cannot, and alone when it is switched off.
+func (r *Router) newSwitchyardOrLegacy(legacy Selector) Selector {
+	switch {
+	case r.cfg.Switchyard == nil:
+		slog.Warn(`strategy "switchyard" has no algorithm configured, routing with the rule router`, "run", r.cfg.RunName)
+		return legacy
+	case os.Getenv(envDisableSwitchyard) == "true":
+		slog.Warn("switchyard is disabled by "+envDisableSwitchyard+", routing with the rule router", "run", r.cfg.RunName)
+		return legacy
+	}
+	timeout := switchyardTimeout(r.cfg)
+	return newSwitchyardSelector(r.cfg, legacy, func(ctx context.Context, p *ProviderConfig, req ChatCompletionRequest) ([]byte, error) {
+		return r.forwardToProviderWithin(ctx, p, req, timeout)
+	})
 }
 
 // selectProvider asks the Selector for the provider that serves this call.
@@ -4195,14 +4217,18 @@ func maxContextWindow(providers []ProviderConfig) int {
 
 // ChatCompletionRequest mirrors the OpenAI chat completion request body.
 type ChatCompletionRequest struct {
-	Model         string           `json:"model"`
-	Messages      []Message        `json:"messages"`
-	Tools         []map[string]any `json:"tools,omitempty"`
-	ToolChoice    any              `json:"tool_choice,omitempty"`
-	MaxTokens     int              `json:"max_tokens,omitempty"`
-	Temperature   *float64         `json:"temperature,omitempty"`
-	Stream        bool             `json:"stream,omitempty"`
-	StreamOptions *StreamOptions   `json:"stream_options,omitempty"`
+	Model       string           `json:"model"`
+	Messages    []Message        `json:"messages"`
+	Tools       []map[string]any `json:"tools,omitempty"`
+	ToolChoice  any              `json:"tool_choice,omitempty"`
+	MaxTokens   int              `json:"max_tokens,omitempty"`
+	Temperature *float64         `json:"temperature,omitempty"`
+	// MaxCompletionTokens and ResponseFormat are set by routing judges: they
+	// need a bounded, structured answer and are forwarded to the provider as is.
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"`
+	ResponseFormat      json.RawMessage `json:"response_format,omitempty"`
+	Stream              bool            `json:"stream,omitempty"`
+	StreamOptions       *StreamOptions  `json:"stream_options,omitempty"`
 }
 
 // StreamOptions controls streaming behavior.
@@ -4433,6 +4459,14 @@ func (r *Router) ClaimRun(input WarmRunInput) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cfg.RunName = input.RunName
+	// The run's identity replaces the previous claim's. Older operators send no
+	// session, and the run is then its own.
+	r.cfg.SessionID = cmp.Or(input.SessionID, input.RunName)
+	r.cfg.ParentRunName = input.ParentRunName
+	r.cfg.WorkflowStep = input.WorkflowStep
+	if s, ok := r.selector.(sessionSelector); ok {
+		s.NewSession(r.cfg.SessionID)
+	}
 	r.initSpendSeriesLocked()
 	r.cfg.CheckpointKey = checkpointKeyForRun(input.RunName)
 	// An explicit resume key (restart recovery: the run's own checkpoint) wins

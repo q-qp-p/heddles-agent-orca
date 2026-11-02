@@ -21,9 +21,10 @@ COPY internal/mcp/ internal/mcp/
 COPY internal/oauth/ internal/oauth/
 COPY internal/podbuilder/ internal/podbuilder/
 COPY internal/ratelimit/ internal/ratelimit/
-COPY internal/router/*.go internal/router/
+COPY internal/router/ internal/router/
 COPY internal/security/*.go internal/security/
 COPY internal/state/ internal/state/
+COPY third_party/switchyard/bindings/go/ third_party/switchyard/bindings/go/
 # END generated go-deps
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \

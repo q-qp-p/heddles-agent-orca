@@ -54,7 +54,7 @@ behind the NetworkPolicy](#reaching-agent-pod-metrics-behind-the-networkpolicy))
 | `agentorca_modelrouter_llm_latency_seconds` | Histogram | `provider` | Routing a call to the end of its response stream |
 | `agentorca_modelrouter_llm_ttft_seconds` | Histogram | `provider` | Routing a call to its first token |
 | `agentorca_modelrouter_llm_errors_total` | Counter | `provider`, `class` | Failed calls (`rate_limited`, `provider_5xx`, `provider_4xx`, `timeout`, `request_too_large`, `cancelled`, `stream_interrupted`, `provider_error`) |
-| `agentorca_modelrouter_routing_decisions_total` | Counter | `strategy`, `path`, `stage` | Selections, by the rule or meta-router path that made them and the task stage. Capability rules report as `rule:capability` |
+| `agentorca_modelrouter_routing_decisions_total` | Counter | `strategy`, `path`, `stage` | Selections, by the path that made them and the task stage. Paths: `rule:*` (the rule router; capability rules report as `rule:capability`), `meta` / `meta-cache`, `fallback`, `switchyard`, and `switchyard-failopen` (Switchyard could not decide and the rule router did) |
 | `agentorca_modelrouter_routing_fallbacks_total` | Counter | `from`, `to` | Calls served by a fallback after another provider failed |
 | `agentorca_modelrouter_tool_calls_total` | Counter | | Tool calls the router dispatched |
 | `agentorca_modelrouter_stream_duration_seconds` | Histogram | | Duration of a streaming chat response |

@@ -1,0 +1,39 @@
+{
+  "description": "An algorithm that answers for the model is not served; the rule router decides",
+  "algorithm": {
+    "type": "advisor"
+  },
+  "providers": [
+    {
+      "name": "weak",
+      "weight": 1
+    },
+    {
+      "name": "strong",
+      "weight": 1
+    },
+    {
+      "name": "judge",
+      "weight": 0
+    }
+  ],
+  "capabilityRouting": {
+    "capable": "strong",
+    "efficient": "weak",
+    "judge": "judge"
+  },
+  "history": {
+    "rounds": 0
+  },
+  "judge": {},
+  "expect": {
+    "provider": "weak",
+    "path": "switchyard-failopen",
+    "algorithm": "advisor",
+    "label": "",
+    "candidates": [
+      "weak"
+    ],
+    "judgeCalls": 0
+  }
+}

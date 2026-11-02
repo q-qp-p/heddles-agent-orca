@@ -1,0 +1,46 @@
+{
+  "description": "Repeated failures escalate to the capable model by hard override",
+  "algorithm": {
+    "type": "stage_router",
+    "picker": "efficient_first",
+    "capable_target": "strong",
+    "efficient_target": "weak",
+    "confidence_threshold": 0.5
+  },
+  "providers": [
+    {
+      "name": "weak",
+      "weight": 1
+    },
+    {
+      "name": "strong",
+      "weight": 1
+    },
+    {
+      "name": "judge",
+      "weight": 0
+    }
+  ],
+  "capabilityRouting": {
+    "capable": "strong",
+    "efficient": "weak",
+    "judge": "judge"
+  },
+  "history": {
+    "rounds": 5,
+    "tool": "Bash",
+    "result": "Traceback (most recent call last):\n  File x\nError: command failed with exit code 1\nFAILED tests/test_parser.py::test_x"
+  },
+  "judge": {},
+  "expect": {
+    "provider": "strong",
+    "path": "switchyard",
+    "algorithm": "stage_router",
+    "label": "override",
+    "candidates": [
+      "strong",
+      "weak"
+    ],
+    "judgeCalls": 0
+  }
+}

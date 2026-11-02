@@ -2370,6 +2370,9 @@ func warmRunInput(run *agentorcav1alpha1.AgentRun) router.WarmRunInput {
 		PriorRunRef:         run.Spec.PriorRunRef,
 		ResumeCheckpointKey: resumeCheckpointKey(run),
 		Restart:             isRestartRecovery(run),
+		SessionID:           runSessionID(run),
+		ParentRunName:       run.Spec.ParentRunRef,
+		WorkflowStep:        run.Labels[labelWorkflowStep],
 	}
 }
 
