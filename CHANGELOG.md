@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sandbox credentials** — a `SandboxClass` can now hold `credentials`: secrets its sandboxes use but never
+  read. The sandbox gets a placeholder in `AGENTORCA_CRED_<NAME>`, and the supervisor swaps in the real value
+  only on the credential's bound `host:port` (optionally limited to binaries and URL paths), with the access
+  the class's egress allows. Sources are `secretRef` (read from the workload's namespace, or another namespace
+  of its tenant) and `githubApp` (a one-hour, repository-narrowed installation token for git, renewed while
+  the sandbox runs). Works in the `sandbox_exec` shell, `runtime.sandbox` and, for `githubApp`, workflow
+  sandboxes. `runtime.sandbox.github` and the workflow `push` field keep working and are unioned with the
+  class. New admission webhook for SandboxClass; see `docs/openshell-sandbox.md#class-credentials`.
 - **A Routing tab in the UI** — lists the operator's routing recommendations with the evidence behind
   each, the patch and how to undo it, and lets you copy a change as a `kubectl patch` command or as YAML.
   Where a benchmark allows applying, it asks for an approval to apply a change or to undo one (nothing

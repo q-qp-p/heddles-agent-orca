@@ -122,6 +122,9 @@ type SpecInput struct {
 	// Git, when set, grants git access to GitHub through a credential-bound
 	// endpoint (see ApplyGitAccess).
 	Git *GitAccess
+	// ClassCredentials are the SandboxClass credentials to bind, each with its
+	// provider already ensured and listed in Providers.
+	ClassCredentials []*ClassCredential
 }
 
 // ToolEndpoint is one network destination of one of the Agent's tools.
@@ -141,6 +144,9 @@ func BuildSpec(in SpecInput) *osv1.SandboxSpec {
 	rt := in.Agent.Spec.Runtime
 	policy := CompilePolicy(in.RouterHost, rt.Sandbox, in.Tools)
 	addRouterHosts(policy, rt.Sandbox, in.ExtraRouterHosts)
+	if rt.Sandbox != nil {
+		ApplyClassCredentials(policy, in.ClassCredentials, rt.Sandbox.Egress)
+	}
 	ApplyGitAccess(policy, in.Git)
 	return &osv1.SandboxSpec{
 		Template: &osv1.SandboxTemplate{

@@ -156,21 +156,36 @@ func workflowGitProviderName(wf *agentorcav1alpha1.AgentWorkflow) string {
 	return openshell.GitProviderName(wf.Namespace, "workflow-"+wf.Name)
 }
 
+// workflowGitHub is the git access the workflow's sandboxes share: its own
+// repository (with push when spec.sandbox.push) plus whatever the class's
+// githubApp credentials grant.
+func workflowGitHub(wf *agentorcav1alpha1.AgentWorkflow, classGitHub *agentorcav1alpha1.SandboxGitHub) *agentorcav1alpha1.SandboxGitHub {
+	return openshell.MergeGitHub(
+		&agentorcav1alpha1.SandboxGitHub{Repositories: []string{wf.Spec.Sandbox.Repo}, Push: wf.Spec.Sandbox.Push},
+		classGitHub)
+}
+
 // ensureWorkflowGit maintains the optional credential-bound GitHub access. A
 // workflow without the operator's GitHub App can still clone a public repo;
 // GIT_TERMINAL_PROMPT=0 makes an accidental private repo fail instead of wait.
-func (r *AgentWorkflowReconciler) ensureWorkflowGit(ctx context.Context, wf *agentorcav1alpha1.AgentWorkflow) (*openshell.GitAccess, error) {
+// A class that grants GitHub access (classGitHub, from its githubApp
+// credentials) needs the App: the workflow does not start without it.
+func (r *AgentWorkflowReconciler) ensureWorkflowGit(ctx context.Context, wf *agentorcav1alpha1.AgentWorkflow, classGitHub *agentorcav1alpha1.SandboxGitHub) (*openshell.GitAccess, error) {
 	if r.GitHubApp == nil {
+		if classGitHub != nil {
+			return nil, errNoGitHubApp
+		}
 		return nil, nil
 	}
+	gh := workflowGitHub(wf, classGitHub)
+	access := &openshell.GitAccess{Repositories: gh.Repositories, Push: gh.Push, Provider: workflowGitProviderName(wf)}
 	status := wf.Status.Sandbox
 	if status != nil && status.GitTokenExpiry != nil && time.Until(status.GitTokenExpiry.Time) > gitTokenRefreshBefore {
-		return &openshell.GitAccess{Repositories: []string{wf.Spec.Sandbox.Repo}, Push: wf.Spec.Sandbox.Push, Provider: workflowGitProviderName(wf)}, nil
+		return access, nil
 	}
 	if err := r.Sandboxes.EnsureProfile(ctx, openshell.GitProfile(wf.Namespace)); err != nil {
 		return nil, err
 	}
-	gh := &agentorcav1alpha1.SandboxGitHub{Repositories: []string{wf.Spec.Sandbox.Repo}, Push: wf.Spec.Sandbox.Push}
 	tok, err := r.GitHubApp.InstallationToken(ctx, gitTokenRequest(gh))
 	if err != nil {
 		return nil, fmt.Errorf("minting the workflow's GitHub token: %w", err)
@@ -185,7 +200,7 @@ func (r *AgentWorkflowReconciler) ensureWorkflowGit(ctx context.Context, wf *age
 	}
 	expiry := metav1.NewTime(tok.ExpiresAt)
 	wf.Status.Sandbox.GitTokenExpiry = &expiry
-	return &openshell.GitAccess{Repositories: []string{wf.Spec.Sandbox.Repo}, Push: wf.Spec.Sandbox.Push, Provider: workflowGitProviderName(wf)}, nil
+	return access, nil
 }
 
 // ensureWorkflowSandbox creates and checks out the shared sandbox. Its status
@@ -224,7 +239,7 @@ func (r *AgentWorkflowReconciler) ensureWorkflowSandbox(ctx context.Context, wf 
 		}
 		return false, ctrl.Result{}, err
 	}
-	git, err := r.ensureWorkflowGit(ctx, wf)
+	git, err := r.ensureWorkflowGit(ctx, wf, agent.Spec.Runtime.Sandbox.GitHub)
 	if err != nil {
 		return false, ctrl.Result{}, err
 	}
@@ -428,7 +443,10 @@ func (r *AgentWorkflowReconciler) freshSandboxSpec(ctx context.Context, wf *agen
 	var git *openshell.GitAccess
 	var providers []string
 	if r.GitHubApp != nil {
-		git = &openshell.GitAccess{Repositories: []string{wf.Spec.Sandbox.Repo}, Provider: workflowGitProviderName(wf)}
+		// Fresh sandboxes stay read-only unless their class grants more: the
+		// workflow's own push never reaches them.
+		gh := openshell.MergeGitHub(&agentorcav1alpha1.SandboxGitHub{Repositories: []string{wf.Spec.Sandbox.Repo}}, agent.Spec.Runtime.Sandbox.GitHub)
+		git = &openshell.GitAccess{Repositories: gh.Repositories, Push: gh.Push, Provider: workflowGitProviderName(wf)}
 		maps.Copy(env, openshell.GitEnv())
 		providers = append(providers, git.Provider)
 	}

@@ -105,6 +105,23 @@ webhooks:
         resources: ["tools"]
     failurePolicy: {{ .Values.webhook.failurePolicy | default "Fail" }}
     sideEffects: None
+  - name: vsandboxclass.kb.io
+    admissionReviewVersions: ["v1"]
+    clientConfig:
+      service:
+        name: {{ include "agent-orca.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-agentorca-agentorca-io-v1alpha1-sandboxclass
+      {{- if not .Values.webhook.certManager }}
+      caBundle: {{ $caCert | b64enc }}
+      {{- end }}
+    rules:
+      - apiGroups: ["agentorca.agentorca.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["sandboxclasses"]
+    failurePolicy: {{ .Values.webhook.failurePolicy | default "Fail" }}
+    sideEffects: None
 ---
 apiVersion: v1
 kind: Service

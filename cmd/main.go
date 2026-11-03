@@ -567,6 +567,10 @@ func main() {
 		setupLog.Error(err, "Failed to set up Tool webhook")
 		os.Exit(1)
 	}
+	if err := agentwebhook.SetupSandboxClassWebhook(mgr); err != nil {
+		setupLog.Error(err, "Failed to set up SandboxClass webhook")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -653,6 +657,7 @@ func main() {
 			Sandboxes:         sandboxes,
 			SandboxPlacement:  sandboxPlacement,
 			AllowedRegistries: allowedRegistries,
+			GitHubApp:         gitHubApp,
 		})
 	}
 	go func() {

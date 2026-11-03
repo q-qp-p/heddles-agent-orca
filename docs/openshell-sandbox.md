@@ -128,6 +128,13 @@ spec:
   nodeSelector: {pool: sandbox}      # replaces the operator-wide placement
   tolerations:
     - {key: openshell, operator: Equal, value: coder-agent, effect: NoExecute}
+  credentials:                       # secrets the sandbox can use but never read
+    - name: github
+      source:
+        githubApp:
+          repositories: [heddles/agent-orca]
+          permissions: {contents: write}
+      bind: {host: github.com}
 ```
 
 The Agent's own sandbox settings are added to the class's, never narrowing it:
@@ -139,6 +146,8 @@ The Agent's own sandbox settings are added to the class's, never narrowing it:
 | `enforcement` | The stricter of the two. |
 | `spec.resources` | The Agent's own, or the class's when it sets none. |
 | Placement | The class's when it sets any, else the operator's `openshell.placement`. Agents can't set placement. |
+| `credentials` | Only the class has them; every sandbox of the class gets all of them. An Agent or workflow can't add, remove or widen one. See [class credentials](#class-credentials). |
+| `runtime.sandbox.github` | Unioned with the class's `githubApp` credentials: all repositories, and push if either pushes. |
 
 A run fails with a clear reason if its class doesn't exist or doesn't select the run's
 namespace. Admission checks the same.
@@ -157,8 +166,83 @@ namespace. Admission checks the same.
 | `mise` | `mise.jdx.dev`, `mise-versions.jdx.dev`, `api.github.com`, `*.githubusercontent.com` |
 
 All presets are read-only (GET, HEAD, OPTIONS) except `github.com`, and any binary may
-use them. Unauthenticated, a POST to `github.com` can't change anything. With
-`sandbox.github`, the credential-bound endpoint replaces it.
+use them. Unauthenticated, a POST to `github.com` can't change anything, so `github-read`
+never gives write access. To push, give the class a [`githubApp` credential](#class-credentials)
+(or an Agent `sandbox.github`); the credential-bound endpoint replaces the plain one.
+
+### Class credentials
+
+A SandboxClass can hold the secrets its sandboxes need: a GitHub token, an API key, a
+database password. They are defined once, on the class. A workload picks the class and an
+image and declares nothing else, so anything in the image that can use a credential
+(`git`, `curl`, `psql`, `terraform`, an SDK) can use it, whatever the workload does.
+
+```yaml
+spec:
+  egress:
+    - {host: api.example.com, access: read-write}   # the class must let the sandbox reach the host
+  credentials:
+    - name: warehouse
+      source:
+        secretRef: {name: warehouse-token, key: token}
+      bind:
+        host: api.example.com
+        binaries: [/usr/bin/curl]
+        paths: ["/v1/**"]
+      inject: {style: bearer}
+```
+
+**The sandbox never holds the secret.** Each sandbox gets a placeholder in the environment
+variable `AGENTORCA_CRED_<NAME>` (name upper-cased, dashes as underscores). The supervisor
+replaces the placeholder with the real value on requests to the bound endpoint, and nowhere
+else. The process sends the placeholder like the real thing, e.g.
+`curl -H "Authorization: Bearer $AGENTORCA_CRED_WAREHOUSE" https://api.example.com/v1/jobs`.
+The supervisor does not add headers, so the process must send it. A command that prints
+the variable, or sends it to another host, gets the placeholder.
+
+| Field | |
+|---|---|
+| `name` | Unique within the class: lower-case letters, digits and dashes. |
+| `source` | Exactly one of `githubApp` or `secretRef` (below). |
+| `bind.host`, `bind.port` | The only endpoint the value works on. An exact host, not a wildcard. Port defaults to 443. |
+| `bind.binaries` | Executables (absolute paths) that may use the value. Empty lets any process use it, and admission warns. |
+| `bind.paths` | URL path globs the value works for, e.g. `/v1/**`. Empty means any path. Methods stay limited by the egress access (below). |
+| `inject.style` | Where the supervisor replaces the placeholder: `bearer` (the default; `Authorization: Bearer`), `basic` (the value is the password; the client chooses the user) or `header` (the value alone in the header named by `inject.name`). |
+
+**Sources**
+
+| Source | Value |
+|---|---|
+| `secretRef: {name, key, namespace}` | A key of a Kubernetes Secret, read by the operator when the sandbox is created. `namespace` is optional and defaults to the namespace of the workload that uses the class, so each tenant's workloads get their own value under the same name. Another namespace must be in `allowedNamespaces` of the TenantConfig the workload's namespace belongs to; a namespace in no TenantConfig can read only its own. Otherwise the run fails with a clear reason. |
+| `githubApp: {repositories, permissions}` | A one-hour installation token of the operator's GitHub App, narrowed to the listed repositories and valid only for git over HTTPS to `github.com`. `permissions.contents` is `read` (the default: clone and fetch) or `write` (also push); no other permission is accepted. See [git access](#git-access-to-github). |
+
+**Rules**
+
+- A credential binds an endpoint, it does not open one. `bind.host:port` must be reachable
+  under the class's `egress` or presets, and the credential gets the access that egress rule
+  gives the host: read-only (GET, HEAD, OPTIONS) unless the rule says `read-write` (adds
+  POST, PUT, PATCH) or `full` (every method). `bind.paths` narrow that, never widen it.
+  Admission rejects the class otherwise.
+- A destination carries one credential. Binding it removes the host and port from the
+  class's other egress rules, so processes the credential doesn't name (see `bind.binaries`)
+  lose access to it. A wildcard egress rule (`*.example.com`) that also covers the bound
+  host makes the gateway reject the policy; use an exact host.
+- A `githubApp` credential must bind `github.com:443` and takes no `bind.binaries`,
+  `bind.paths` or `inject`: it is always git, by the git binary, to its repositories.
+- A class holds at most 16 credentials, and a sandbox at most 32 providers with tool
+  credentials and git.
+
+**Lifecycle.** Credentials are resolved when the sandbox is created. The value goes into a
+per-run OpenShell provider labeled with the run (or workflow), which is deleted when it
+ends; the sandbox spec never contains it. A `secretRef` value is not re-read while the
+sandbox runs: a rotated Secret reaches the next sandbox. A `githubApp` token is renewed
+before it expires.
+
+They apply to the agent's own sandbox (`runtime.sandbox.classRef`), to the
+[`sandbox_exec` shell](sandbox-shell.md) (`shell.classRef`) and, for `githubApp`, to
+workflow sandboxes. `secretRef` credentials are not wired into workflow-owned sandboxes yet.
+Examples: [`sandboxclass-coder.yaml`](../config/samples/sandboxclass-coder.yaml) (GitHub) and
+[`sandboxclass-credentials.yaml`](../config/samples/sandboxclass-credentials.yaml) (an API token).
 
 ### Network decisions in the run trace
 
@@ -380,6 +464,13 @@ repositories over HTTPS, using the operator's GitHub App:
         push: true
 ```
 
+To give every sandbox of a class the same access, put it on the class instead, as a
+`githubApp` [credential](#class-credentials) (`permissions: {contents: write}` for push).
+The two forms are the same thing: an Agent's `sandbox.github` and its class's `githubApp`
+credentials are unioned (all repositories, push if either pushes) and compile to one
+endpoint. Everything below applies to both. The class must also let the sandbox reach
+`github.com`, with the `github-read` preset or an egress rule.
+
 - **Token:** when the sandbox starts, the operator mints an installation token for the
   App. It is narrowed to these repositories and to `contents: read`, or `write` with
   `push`, and lasts one hour. The operator replaces it 15 minutes before it expires;
@@ -413,8 +504,8 @@ To set it up:
    (`operator.networkPolicy.oidcEgress`), the allowed CIDRs must include
    `api.github.com`.
 
-A run whose Agent sets `sandbox.github` fails with a clear reason when the operator has
-no App configured, or when GitHub refuses the token, e.g. because the App isn't
+A run whose Agent sets `sandbox.github`, or whose class has a `githubApp` credential, fails
+with a clear reason when the operator has no App configured, or when GitHub refuses the token, e.g. because the App isn't
 installed on a listed repository.
 
 ### Admission rules
@@ -500,6 +591,8 @@ These are deliberate scope limits of this first version, tracked against
   provider so the workload sees only a placeholder is still to do (tool credentials
   already work this way).
 - **No http input mode, no AgentDeployments, no warm sandboxes** (Phase 4).
+- **Class credentials in workflow-owned sandboxes:** `githubApp` works there; `secretRef`
+  does not yet. A rotated `secretRef` Secret reaches only new sandboxes.
 - **No `SandboxPolicy` CRD yet.** Egress and filesystem extras are inline on the Agent. A
   shared, reusable policy CRD and TenantConfig defaults are a follow-up.
 - **No OCSF decision stream into egress sinks/UI timeline yet** (Phase 3). Use

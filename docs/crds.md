@@ -180,7 +180,7 @@ spec:
 | `runtime.sandbox` | Run the agent in an NVIDIA OpenShell sandbox with a shell, exec and policy-controlled egress (see [openshell-sandbox.md](openshell-sandbox.md)) |
 | `runtime.localTools` | Let the agent process run the tools it declares (e.g. a shell in its sandbox): the router returns their calls with `finish_reason: tool_calls` and takes the results on the next request (see [agent-run-tools.md](agent-run-tools.md)) |
 | `shell` | Give the agent a `sandbox_exec` tool that runs shell commands in a per-run OpenShell sandbox governed by the named SandboxClass (see [sandbox-shell.md](sandbox-shell.md)): `classRef`, `image`, `workDir`, `maxTimeoutSeconds` |
-| `runtime.sandbox.classRef` | A cluster-scoped [SandboxClass](openshell-sandbox.md#sandbox-classes): egress presets and rules, filesystem, resource defaults, placement and minimum enforcement the Agent adds to but cannot weaken |
+| `runtime.sandbox.classRef` | A cluster-scoped [SandboxClass](openshell-sandbox.md#sandbox-classes): egress presets and rules, filesystem, resource defaults, placement and minimum enforcement the Agent adds to but cannot weaken, and the [credentials](openshell-sandbox.md#class-credentials) (GitHub token, API keys) its sandboxes can use but never read |
 | `memory.checkpointEvery` | LLM turns between checkpoints (default: 1) |
 | `memory.resumeWindowSeconds` | State retention after failure (default: 3600) |
 | `memory.archiveOnCompletion` | Promote checkpoint to object storage on success |

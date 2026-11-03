@@ -50,6 +50,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /validate-agentorca-agentorca-io-v1alpha1-sandboxclass
+  failurePolicy: Fail
+  name: vsandboxclass.kb.io
+  rules:
+  - apiGroups:
+    - agentorca.agentorca.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - sandboxclasses
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /validate-agentorca-agentorca-io-v1alpha1-tool
   failurePolicy: Fail
   name: vtool.kb.io

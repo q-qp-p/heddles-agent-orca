@@ -59,14 +59,37 @@ filesystem does.
 | | Decided by |
 |---|---|
 | Network egress, filesystem paths, resources, node placement, minimum enforcement | The **SandboxClass** only. The Agent cannot widen it. |
+| Credentials (a GitHub token, API keys) | The **SandboxClass** only: its [`credentials`](openshell-sandbox.md#class-credentials). The Agent cannot add one. |
 | Whether the Agent has a shell | `spec.shell` on the Agent, and the namespace opt-in label |
 | Which image | `spec.shell.image`, subject to `ALLOWED_REGISTRIES` |
 | Maximum command length of time | `spec.shell.maxTimeoutSeconds` |
 
 Enforcement is always `enforce`: a connection to a host the class does not allow is denied,
 and OpenShell proposes the host in the draft inbox, so a person can approve it from the UI
-([egress approvals](openshell-sandbox.md#egress-approvals)). The sandbox has no credentials: no
-git token, no model access and no tool credentials.
+([egress approvals](openshell-sandbox.md#egress-approvals)). The sandbox has no model access and no
+tool credentials. It has only the secrets its class's
+[`credentials`](openshell-sandbox.md#class-credentials) give it, and never as values: commands
+see a placeholder that the supervisor replaces on the one endpoint each credential is bound to.
+
+## Credentials
+
+A class with a `githubApp` credential lets commands `git clone`, `fetch` and (with
+`contents: write`) `push` to its repositories, with no setup in the image: the operator
+configures git to use the credential. A class with a `secretRef` credential gives commands
+a placeholder in `$AGENTORCA_CRED_<NAME>` to send in the header the API expects:
+
+```
+curl -H "Authorization: Bearer $AGENTORCA_CRED_WAREHOUSE" https://api.example.com/v1/jobs
+```
+
+The credential works only on its bound host, only for the binaries and paths it names, and
+only as far as the class's egress rule for that host allows (read-only unless it says
+`read-write`). No sandbox is created without the credentials its class promises: a missing
+Secret, a Secret outside the workload's tenant or a missing GitHub App fails the call with
+the reason. A GitHub token is renewed while commands run (the shell checks on each command
+and while a command is polled).
+Example: [`sandboxclass-coder.yaml`](../config/samples/sandboxclass-coder.yaml). Full
+reference: [class credentials](openshell-sandbox.md#class-credentials).
 
 ## How a call runs
 
@@ -94,8 +117,9 @@ operator restart. The router stops the job if the command times out or the run i
 
 - **AgentRuns only.** An AgentDeployment's pods have no per-run sandbox to attach to, so the
   tool is not added to them.
-- **No git or secrets in the sandbox.** Cloning a private repository is not supported yet; public
-  hosts the class allows work. (Workflow sandboxes, `AgentWorkflow.spec.sandbox`, have git access.)
+- **Credentials only through the class.** There is no per-Agent git or secret setting for the
+  shell; give the class a [credential](openshell-sandbox.md#class-credentials). A rotated
+  `secretRef` Secret reaches the next run's sandbox, not a running one.
 - **Not tied to tool side-effect classes.** Every command is allowed; the sandbox's policy is the
   control. A per-command approval would be a follow-up on
   [tool side effects](tool-side-effects.md).

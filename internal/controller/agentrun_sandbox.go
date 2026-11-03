@@ -103,15 +103,25 @@ func (r *AgentRunReconciler) ensureSandbox(
 	if git != nil {
 		providers = append(providers, git.Provider)
 	}
+	classCreds, err := resolveClassCredentials(ctx, r.Client, run.Namespace, class)
+	if err != nil {
+		return nil, err
+	}
+	classProviders, err := ensureClassCredentials(ctx, r.Sandboxes, run.Namespace, sandboxProviderOwner(run), sandboxRunLabels(run), classCreds)
+	if err != nil {
+		return nil, err
+	}
+	providers = append(providers, classProviders...)
 
 	spec := openshell.BuildSpec(openshell.SpecInput{
-		Agent:      agent,
-		RouterHost: r.sandboxRouterHost(run),
-		Env:        env,
-		Tools:      tools,
-		Providers:  providers,
-		Placement:  placement,
-		Git:        git,
+		Agent:            agent,
+		RouterHost:       r.sandboxRouterHost(run),
+		Env:              env,
+		Tools:            tools,
+		Providers:        providers,
+		Placement:        placement,
+		Git:              git,
+		ClassCredentials: classCreds,
 	})
 	name := openshell.SandboxName(run.Namespace, run.Name, run.Status.RestartCount)
 	return r.Sandboxes.Create(ctx, name, spec, sandboxRunLabels(run))
@@ -129,6 +139,20 @@ func sandboxRunLabels(run *agentorcav1alpha1.AgentRun) map[string]string {
 		openshell.LabelRunName:      security.SafeLabelValue(run.Name),
 		openshell.LabelRunNamespace: run.Namespace,
 	}
+}
+
+// sandboxProviderOwner names who owns the run's credential providers on the
+// gateway: the run, or the workflow whose sandbox it shares.
+func sandboxProviderOwner(run *agentorcav1alpha1.AgentRun) string {
+	if ref := run.Spec.WorkflowSandbox; ref != nil {
+		if !ref.Fresh {
+			return "workflow-" + run.Labels[labelWorkflow]
+		}
+		if ref.ProviderOwner != "" {
+			return ref.ProviderOwner
+		}
+	}
+	return run.Name
 }
 
 // ensureSandboxTools resolves what the sandbox may do with the Agent's tools:
@@ -199,14 +223,7 @@ func ensureSandboxTools(
 	}
 	eps = openshell.FilterToolEndpoints(sb, eps)
 
-	ownerName := run.Name
-	if ref := run.Spec.WorkflowSandbox; ref != nil {
-		if !ref.Fresh {
-			ownerName = "workflow-" + run.Labels[labelWorkflow]
-		} else if ref.ProviderOwner != "" {
-			ownerName = ref.ProviderOwner
-		}
-	}
+	ownerName := sandboxProviderOwner(run)
 	providerName := func(c *openshell.ToolCredential) string {
 		return openshell.ProviderName(run.Namespace, ownerName, c.Source)
 	}

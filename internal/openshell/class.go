@@ -65,8 +65,9 @@ func PresetEgress(p agentorcav1alpha1.SandboxEgressPreset) []agentorcav1alpha1.S
 // (nil for none) and egress presets folded in, and the placement for its pods.
 // Class and Agent settings are combined, never narrowed: egress and filesystem
 // paths are unioned, enforcement is the stricter of the two, resources come
-// from the Agent and default to the class's, and placement comes from the
-// class, else the operator's. The Agent passed in is not modified.
+// from the Agent and default to the class's, git access is unioned (the class's
+// githubApp credentials become spec.runtime.sandbox.github), and placement
+// comes from the class, else the operator's. The Agent passed in is not modified.
 func ApplyClass(agent *agentorcav1alpha1.Agent, class *agentorcav1alpha1.SandboxClass, operatorPlacement Placement) (*agentorcav1alpha1.Agent, Placement) {
 	out := agent.DeepCopy()
 	sb := out.Spec.Runtime.Sandbox
@@ -85,6 +86,7 @@ func ApplyClass(agent *agentorcav1alpha1.Agent, class *agentorcav1alpha1.Sandbox
 		egress = append(egress, c.Egress...)
 		presetNames = append(presetNames, c.EgressPresets...)
 		sb.Filesystem = mergeFilesystem(c.Filesystem, sb.Filesystem)
+		sb.GitHub = MergeGitHub(sb.GitHub, ClassGitHub(class))
 		if out.Spec.Resources == nil && c.Resources != nil {
 			out.Spec.Resources = c.Resources.DeepCopy()
 		}

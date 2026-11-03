@@ -3,8 +3,8 @@
 # for each run on the first call and deletes when the run ends.
 #
 # What the commands can reach is decided by the SandboxClass alone: here the coder
-# class from sandboxclass-coder.yaml (package registries and GitHub read access, all
-# other hosts denied). Apply that class first, and label the namespace:
+# class from sandboxclass-coder.yaml (package registries and git access to GitHub through
+# the class's github credential, all other hosts denied). Apply that class first, and label the namespace:
 #   kubectl label namespace agent-orca-system agentorca.io/enable-sandboxes=true
 apiVersion: agentorca.agentorca.io/v1alpha1
 kind: Agent

@@ -39,7 +39,7 @@ const gitTokenRefreshBefore = 15 * time.Minute
 
 // errNoGitHubApp fails runs whose Agent asks for GitHub access when the
 // operator has no GitHub App configured.
-var errNoGitHubApp = errors.New("spec.runtime.sandbox.github is set but the operator has no GitHub App configured " +
+var errNoGitHubApp = errors.New("spec.runtime.sandbox.github or a githubApp class credential is set but the operator has no GitHub App configured " +
 	"(chart value github.app.secretName)")
 
 // GitHubTokenMinter mints GitHub App installation tokens (githubapp.Client).
@@ -52,7 +52,7 @@ type GitHubTokenMinter interface {
 func gitTokenRequest(gh *agentorcav1alpha1.SandboxGitHub) githubapp.TokenRequest {
 	req := githubapp.TokenRequest{Permissions: map[string]string{"contents": "read", "metadata": "read"}}
 	if gh.Push {
-		req.Permissions["contents"] = "write"
+		req.Permissions["contents"] = string(agentorcav1alpha1.SandboxCredentialPermissionWrite)
 	}
 	for _, repo := range gh.Repositories {
 		_, name, _ := strings.Cut(repo, "/")
@@ -117,6 +117,10 @@ func (r *AgentRunReconciler) storeGitToken(ctx context.Context, run *agentorcav1
 // stays valid until its expiry.
 func (r *AgentRunReconciler) refreshSandboxGit(ctx context.Context, run *agentorcav1alpha1.AgentRun, agent *agentorcav1alpha1.Agent) {
 	gh := agent.Spec.Runtime.Sandbox.GitHub
+	// The class's githubApp credentials are part of the run's git access.
+	if class, err := r.sandboxClass(ctx, run, agent); err == nil {
+		gh = openshell.MergeGitHub(gh, openshell.ClassGitHub(class))
+	}
 	if gh == nil || r.GitHubApp == nil {
 		return
 	}

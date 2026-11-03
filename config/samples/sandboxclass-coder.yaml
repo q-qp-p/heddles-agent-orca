@@ -1,7 +1,15 @@
 # A SandboxClass for coding agents (docs/openshell-sandbox.md#sandbox-classes).
 # Cluster-scoped: only cluster admins create classes, which is why placement
 # (tolerations) lives here and not on Agents. Use it from an Agent with
-# spec.runtime.sandbox.classRef: coder.
+# spec.runtime.sandbox.classRef: coder, or spec.shell.classRef: coder.
+#
+# The github credential is how sandboxes of this class push to GitHub. The sandbox
+# never holds the token: it gets a one-hour installation token of the operator's
+# GitHub App, narrowed to the listed repositories, that only git can use against
+# github.com. Which branches a push may update is governed by the repositories'
+# rulesets on GitHub. Needs the operator's GitHub App (chart value github.app.secretName)
+# and the github-read preset below, which lets the sandbox reach github.com.
+# See docs/openshell-sandbox.md#git-access-to-github.
 apiVersion: agentorca.agentorca.io/v1alpha1
 kind: SandboxClass
 metadata:
@@ -11,6 +19,13 @@ spec:
     matchLabels: {agentorca.io/enable-sandboxes: "true"}
   enforcement: enforce
   egressPresets: [go, npm, pypi, github-read]
+  credentials:
+    - name: github
+      source:
+        githubApp:
+          repositories: [heddles/agent-orca]
+          permissions: {contents: write}   # read (the default) allows clone and fetch only
+      bind: {host: github.com}
   resources:
     requests: {cpu: "2", memory: 4Gi, ephemeral-storage: 20Gi}
     limits: {cpu: "4", memory: 8Gi, ephemeral-storage: 20Gi}

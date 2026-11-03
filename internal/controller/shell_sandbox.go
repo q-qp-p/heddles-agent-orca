@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"time"
 
 	osv1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -39,6 +41,11 @@ import (
 // owner-reference garbage collection, so the run's cleanup deletes it by this name.
 const AnnotationShellSandbox = "agentorca.io/shell-sandbox"
 
+// AnnotationShellGitTokenExpiry records, on an AgentRun, when the GitHub token
+// of its shell sandbox's class credential (RFC 3339) expires. The shell
+// service renews the token while commands run.
+const AnnotationShellGitTokenExpiry = "agentorca.io/shell-git-token-expiry"
+
 // defaultShellWorkDir is where commands run when neither the Agent nor the
 // call names a directory: the writable workspace of every sandbox policy.
 const defaultShellWorkDir = "/sandbox"
@@ -53,6 +60,9 @@ type ShellSandboxService struct {
 	Sandboxes         openshell.Gateway
 	SandboxPlacement  openshell.Placement
 	AllowedRegistries []string
+	// GitHubApp mints the tokens of githubApp class credentials; nil makes a
+	// class that has one unusable.
+	GitHubApp GitHubTokenMinter
 }
 
 var _ shellsandbox.Runner = (*ShellSandboxService)(nil)
@@ -112,6 +122,9 @@ func (s *ShellSandboxService) Start(ctx context.Context, namespace, runName, id,
 		workDir = defaultShellWorkDir
 	}
 	env := map[string]string{"GIT_TERMINAL_PROMPT": "0"}
+	if s.refreshGit(ctx, sc) {
+		maps.Copy(env, openshell.GitEnv())
+	}
 	if err := openshell.StartJob(ctx, s.Sandboxes, sc.name, id, command, env, workDir); err != nil {
 		return false, fmt.Errorf("starting the command: %w", err)
 	}
@@ -124,6 +137,8 @@ func (s *ShellSandboxService) Poll(ctx context.Context, namespace, runName, id s
 	if err != nil {
 		return shellsandbox.Job{}, err
 	}
+	// A long command outlives the hour a GitHub token lasts.
+	s.refreshGit(ctx, sc)
 	st, err := openshell.PollJob(ctx, s.Sandboxes, sc.name, id)
 	if err != nil {
 		if osv1.IsNotFound(err) {
@@ -196,10 +211,38 @@ func (s *ShellSandboxService) create(ctx context.Context, sc *shellContext) (*os
 		return nil, err
 	}
 	agent, placement := openshell.ApplyClass(shellSandboxAgent(cfg), class, s.SandboxPlacement)
+	creds, err := resolveClassCredentials(ctx, s.Client, sc.run.Namespace, class)
+	if err != nil {
+		if errors.Is(err, errSandboxClassUnusable) {
+			return nil, shellsandbox.Rejectedf("%v", err)
+		}
+		return nil, err
+	}
+	// The providers carry the run's labels, so the run's cleanup revokes them
+	// with its other credential providers.
+	providers, err := ensureClassCredentials(ctx, s.Sandboxes, sc.run.Namespace, sc.run.Name+"-shell", sandboxRunLabels(sc.run), creds)
+	if err != nil {
+		return nil, fmt.Errorf("preparing the class credentials: %w", err)
+	}
+	env := map[string]string{"GIT_TERMINAL_PROMPT": "0"}
+	var git *openshell.GitAccess
+	if gh := agent.Spec.Runtime.Sandbox.GitHub; gh != nil {
+		if s.GitHubApp == nil {
+			return nil, shellsandbox.Rejectedf("%v", errNoGitHubApp)
+		}
+		if git, err = s.storeGitToken(ctx, sc, gh); err != nil {
+			return nil, fmt.Errorf("preparing the class's GitHub access: %w", err)
+		}
+		maps.Copy(env, openshell.GitEnv())
+		providers = append(providers, git.Provider)
+	}
 	spec := openshell.BuildSpec(openshell.SpecInput{
-		Agent:     agent,
-		Env:       map[string]string{"GIT_TERMINAL_PROMPT": "0"},
-		Placement: placement,
+		Agent:            agent,
+		Env:              env,
+		Providers:        providers,
+		Placement:        placement,
+		ClassCredentials: creds,
+		Git:              git,
 	})
 	labels := map[string]string{
 		openshell.LabelRunName:      sc.run.Name,
@@ -225,6 +268,56 @@ func (s *ShellSandboxService) create(ctx context.Context, sc *shellContext) (*os
 		return nil, fmt.Errorf("recording the sandbox on the run: %w", err)
 	}
 	return sb, nil
+}
+
+// storeGitToken mints a GitHub token for gh, stores it in the shell sandbox's
+// git provider (creating or updating it) and records its expiry on the run.
+// Updating the provider reaches the running sandbox: each git command is a new
+// process and resolves the placeholder to the provider's current value. The
+// provider carries the run's labels, so the run's cleanup revokes it.
+func (s *ShellSandboxService) storeGitToken(ctx context.Context, sc *shellContext, gh *agentorcav1alpha1.SandboxGitHub) (*openshell.GitAccess, error) {
+	if err := s.Sandboxes.EnsureProfile(ctx, openshell.GitProfile(sc.run.Namespace)); err != nil {
+		return nil, err
+	}
+	tok, err := s.GitHubApp.InstallationToken(ctx, gitTokenRequest(gh))
+	if err != nil {
+		return nil, err
+	}
+	provider := openshell.GitProvider(sc.run.Namespace, sc.run.Name+"-shell", tok.Value, sandboxRunLabels(sc.run))
+	if err := s.Sandboxes.EnsureProvider(ctx, provider); err != nil {
+		return nil, err
+	}
+	patch := client.MergeFrom(sc.run.DeepCopy())
+	if sc.run.Annotations == nil {
+		sc.run.Annotations = map[string]string{}
+	}
+	sc.run.Annotations[AnnotationShellGitTokenExpiry] = tok.ExpiresAt.UTC().Format(time.RFC3339)
+	if err := s.Client.Patch(ctx, sc.run, patch); err != nil {
+		return nil, fmt.Errorf("recording the git token expiry: %w", err)
+	}
+	return &openshell.GitAccess{Repositories: gh.Repositories, Push: gh.Push, Provider: provider.Name}, nil
+}
+
+// refreshGit renews the shell sandbox's GitHub token when it is close to
+// expiry, and reports whether the class gives the sandbox GitHub access at all.
+// A failure is logged and retried on the next call: the current token stays
+// valid until its expiry.
+func (s *ShellSandboxService) refreshGit(ctx context.Context, sc *shellContext) bool {
+	class, err := loadSandboxClass(ctx, s.Client, sc.run.Namespace, sc.agent.Spec.Shell.ClassRef)
+	if err != nil {
+		return false
+	}
+	gh := openshell.ClassGitHub(class)
+	if gh == nil || s.GitHubApp == nil {
+		return false
+	}
+	if exp, err := time.Parse(time.RFC3339, sc.run.Annotations[AnnotationShellGitTokenExpiry]); err == nil && time.Until(exp) > gitTokenRefreshBefore {
+		return true
+	}
+	if _, err := s.storeGitToken(ctx, sc, gh); err != nil {
+		log.FromContext(ctx).Error(err, "refreshing the shell sandbox's GitHub token", "run", sc.run.Name)
+	}
+	return true
 }
 
 // shellSandboxAgent adapts Agent.spec.shell to the Agent shape the sandbox
