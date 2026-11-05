@@ -270,6 +270,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The programming-agent demo chart renders a valid placeholder Secret** — with `githubToken` unset, the
+  `github-mcp-token` placeholder had its `annotations` outside `metadata`. Helm applied it anyway, but Argo
+  CD's diff (and any server-side apply) rejected it with `.annotations: field not declared in schema`.
 - **A deployment's routing events were never recorded.** The operator looked the sidecar up as an
   AgentRun, and a deployment's sidecar posts under the deployment's name, so every post was refused
   with a 404. The operator now accepts either. Its network policy also admitted only run pods on the
