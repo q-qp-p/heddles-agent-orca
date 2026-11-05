@@ -21,6 +21,19 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # The custom golangci-lint (built with plugins) takes minutes to compile;
+      # the analysis cache makes repeat runs incremental.
+      - name: Cache golangci-lint binary and analysis cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            bin/golangci-lint
+            ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('Makefile', '.custom-gcl.yml', 'go.mod') }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            golangci-lint-${{ runner.os }}-${{ hashFiles('Makefile', '.custom-gcl.yml', 'go.mod') }}-
+            golangci-lint-${{ runner.os }}-
+
       - name: Check linter configuration
         run: make lint-config
       - name: Check Dockerfile COPY lines
