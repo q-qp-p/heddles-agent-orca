@@ -293,6 +293,9 @@ profiles:
               operator.oidc.enabled: "false"
               operator.networkPolicy.oidcEgress.enabled: "false"
               openshell.enabled: true
+              # The bundled gateway enforces mTLS and generates this client bundle; without
+              # it the operator cannot reach the gateway and workflows never start.
+              openshell.tls.secretName: openshell-client-tls
             setValueTemplates:
               operator.image.tag: "{{.IMAGE_TAG_ghcr_io_heddles_agent_orca_operator}}"
               mcpIngester.image.tag: "{{.IMAGE_TAG_ghcr_io_heddles_agent_orca_mcp_ingester}}"

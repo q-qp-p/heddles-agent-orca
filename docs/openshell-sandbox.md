@@ -1,6 +1,7 @@
 # Sandboxed agents (NVIDIA OpenShell)
 
 > To give an agent a shell without running the agent itself in a sandbox, see [Sandbox shell](sandbox-shell.md).
+> To run the Claude Code CLI in a sandbox on a Claude subscription, see [Claude Code on a Claude subscription](claude-code-subscription.md).
 
 An Agent with `spec.runtime.sandbox` runs its agent process in an
 [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox instead of a plain

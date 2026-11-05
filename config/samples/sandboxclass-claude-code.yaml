@@ -1,0 +1,59 @@
+# Runs the Claude Code CLI in a sandbox on a Claude subscription (Pro/Max) token.
+# Guide: docs/claude-code-subscription.md
+#
+#   claude setup-token        # on a machine where you are signed in; prints a token
+#   kubectl create secret generic claude-oauth-token -n agent-orca-system --from-literal=token='<token>'
+#   kubectl apply -f config/samples/sandboxclass-claude-code.yaml
+#
+# The sandbox never holds the token. It gets a placeholder in $AGENTORCA_CRED_CLAUDE_OAUTH, and
+# the supervisor swaps in the real token on requests that claude.exe makes to api.anthropic.com.
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: SandboxClass
+metadata:
+  name: claude-code
+spec:
+  namespaceSelector:
+    matchLabels: {agentorca.io/enable-sandboxes: "true"}
+  enforcement: enforce
+  egress:
+    - {host: api.anthropic.com, access: full}
+  credentials:
+    - name: claude-oauth
+      source:
+        secretRef: {name: claude-oauth-token, key: token}
+      bind:
+        host: api.anthropic.com
+        # The npm package runs a native binary. Naming "node" or the /usr/local/bin/claude
+        # symlink does not match, and the connection is denied (transparent_tcp_policy_denied).
+        binaries: [/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe]
+      inject: {style: bearer}
+---
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: Agent
+metadata:
+  name: claude-code
+  namespace: agent-orca-system
+spec:
+  modelSelectorRef: default
+  guardrailPolicyRef: coder-agent
+  disableClarify: true
+  networkIsolation: {splitPod: true}
+  runtime:
+    ociRef: claude-code-sandbox:dev      # build it from docs/examples/claude-code.Dockerfile
+    framework: openai-compatible
+    inputMode: env
+    sandbox: {provider: openshell, classRef: claude-code}
+    command: ["sh", "-c"]
+    args:
+      - |
+        export CLAUDE_CODE_OAUTH_TOKEN="$AGENTORCA_CRED_CLAUDE_OAUTH" HOME=/sandbox
+        claude -p "$AGENTORC_INPUT" --output-format json < /dev/null
+---
+apiVersion: agentorca.agentorca.io/v1alpha1
+kind: AgentRun
+metadata: {name: claude-code-demo, namespace: agent-orca-system}
+spec:
+  agentRef: claude-code
+  input: "Reply with the single word: pong"
+  timeout: 10m
+  restartPolicy: {maxRetries: 0}
