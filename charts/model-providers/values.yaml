@@ -143,6 +143,437 @@ modelProviders:
       costPerMillionOutputTokens: "0.20"
 
   # ════════════════════════════════════════════════════════════════════════════
+  # OpenRouter — one key (openrouter-api-key), many vendors
+  # https://openrouter.ai/models
+  # Prices are OpenRouter list prices per million tokens as of 2026-11-02.
+  # contextWindow and maxOutputTokens come from the OpenRouter catalog.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── Budget / high-volume ──
+
+  # inclusionai/ling-3.0-flash — cheapest tier, text only
+  - name: openrouter-ling-3-0-flash
+    enabled: true
+    litellmModel: "inclusionai/ling-3.0-flash"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - cheap
+      - fast
+    latencyProfile: fast
+    constraints:
+      contextWindow: 262144
+      maxOutputTokens: 32768
+      costPerMillionInputTokens: "0.021"
+      costPerMillionOutputTokens: "0.063"
+
+  # z-ai/glm-5.3-flash — cheap, 1M context, multimodal
+  - name: openrouter-glm-5-3-flash
+    enabled: true
+    litellmModel: "z-ai/glm-5.3-flash"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - cheap
+      - fast
+      - vision
+      - long-context
+    latencyProfile: fast
+    constraints:
+      contextWindow: 1048576
+      maxOutputTokens: 131072
+      costPerMillionInputTokens: "0.0285"
+      costPerMillionOutputTokens: "0.0923"
+
+  # qwen/qwen3.7-flash — cheap, 1M context, multimodal
+  - name: openrouter-qwen3-7-flash
+    enabled: true
+    litellmModel: "qwen/qwen3.7-flash"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - cheap
+      - fast
+      - vision
+      - long-context
+    latencyProfile: fast
+    constraints:
+      contextWindow: 1000000
+      maxOutputTokens: 65536
+      costPerMillionInputTokens: "0.03"
+      costPerMillionOutputTokens: "0.13"
+
+  # deepseek/deepseek-v4.1-flash — cheap reasoning and code, 1M context
+  - name: openrouter-deepseek-v4-1-flash
+    enabled: true
+    litellmModel: "deepseek/deepseek-v4.1-flash"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - cheap
+      - reasoning
+      - code
+      - long-context
+    latencyProfile: fast
+    constraints:
+      contextWindow: 1048576
+      maxOutputTokens: 943718
+      costPerMillionInputTokens: "0.045"
+      costPerMillionOutputTokens: "0.5"
+
+  # nvidia/nemotron-3.5-lightning — NVIDIA small and fast
+  - name: openrouter-nemotron-3-5-lightning
+    enabled: true
+    litellmModel: "nvidia/nemotron-3.5-lightning"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - cheap
+      - fast
+      - code
+    latencyProfile: fast
+    constraints:
+      contextWindow: 262144
+      maxOutputTokens: 235929
+      costPerMillionInputTokens: "0.07"
+      costPerMillionOutputTokens: "0.2"
+
+  # inception/mercury-3 — diffusion LLM, very low latency
+  - name: openrouter-mercury-3
+    enabled: true
+    litellmModel: "inception/mercury-3"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - cheap
+      - fast
+      - code
+    latencyProfile: fast
+    constraints:
+      contextWindow: 1000000
+      maxOutputTokens: 131072
+      costPerMillionInputTokens: "0.1"
+      costPerMillionOutputTokens: "0.35"
+
+  # minimax/minimax-m3.1-flash — cheap agentic model, 1M context
+  - name: openrouter-minimax-m3-1-flash
+    enabled: true
+    litellmModel: "minimax/minimax-m3.1-flash"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - cheap
+      - fast
+      - code
+      - reasoning
+      - long-context
+    latencyProfile: fast
+    constraints:
+      contextWindow: 1048576
+      maxOutputTokens: 524288
+      costPerMillionInputTokens: "0.075"
+      costPerMillionOutputTokens: "0.3"
+
+  # ── Mid tier ──
+
+  # nvidia/nemotron-3.5-super-vl — NVIDIA vision-language
+  - name: openrouter-nemotron-3-5-super-vl
+    enabled: true
+    litellmModel: "nvidia/nemotron-3.5-super-vl"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - vision
+      - reasoning
+      - code
+      - long-context
+    latencyProfile: medium
+    constraints:
+      contextWindow: 1048576
+      maxOutputTokens: 235929
+      costPerMillionInputTokens: "0.15"
+      costPerMillionOutputTokens: "0.5"
+
+  # xiaomi/mimo-v2.6-pro — strong reasoning and code for the price
+  - name: openrouter-mimo-v2-6-pro
+    enabled: true
+    litellmModel: "xiaomi/mimo-v2.6-pro"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - vision
+      - long-context
+    latencyProfile: medium
+    constraints:
+      contextWindow: 1050000
+      maxOutputTokens: 131072
+      costPerMillionInputTokens: "0.435"
+      costPerMillionOutputTokens: "0.87"
+
+  # qwen/qwen3.8-27b — open-weight class, 1M context
+  - name: openrouter-qwen3-8-27b
+    enabled: true
+    litellmModel: "qwen/qwen3.8-27b"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - vision
+      - long-context
+    latencyProfile: medium
+    constraints:
+      contextWindow: 1024000
+      maxOutputTokens: 235929
+      costPerMillionInputTokens: "0.15"
+      costPerMillionOutputTokens: "1.875"
+
+  # bytedance-seed/seed-2.0-code — code-focused
+  - name: openrouter-seed-2-0-code
+    enabled: true
+    litellmModel: "bytedance-seed/seed-2.0-code"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - code
+      - reasoning
+      - vision
+    latencyProfile: medium
+    constraints:
+      contextWindow: 262144
+      maxOutputTokens: 131072
+      costPerMillionInputTokens: "0.5"
+      costPerMillionOutputTokens: "3"
+
+  # z-ai/glm-5.3 — cheap input, reasoning
+  - name: openrouter-glm-5-3
+    enabled: true
+    litellmModel: "z-ai/glm-5.3"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - long-context
+    latencyProfile: medium
+    constraints:
+      contextWindow: 1048576
+      maxOutputTokens: 943718
+      costPerMillionInputTokens: "0.08"
+      costPerMillionOutputTokens: "3.6"
+
+  # mistralai/mistral-large-4-0 — general purpose, 1M context
+  - name: openrouter-mistral-large-4
+    enabled: true
+    litellmModel: "mistralai/mistral-large-4-0"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - vision
+      - long-context
+    latencyProfile: medium
+    constraints:
+      contextWindow: 1048576
+      maxOutputTokens: 262144
+      costPerMillionInputTokens: "0.7"
+      costPerMillionOutputTokens: "2.1"
+
+  # google/gemini-3.8-flash — fast multimodal, 1M context
+  - name: openrouter-gemini-3-8-flash
+    enabled: true
+    litellmModel: "google/gemini-3.8-flash"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - fast
+      - vision
+      - reasoning
+      - code
+      - long-context
+    latencyProfile: fast
+    constraints:
+      contextWindow: 1048576
+      maxOutputTokens: 65536
+      costPerMillionInputTokens: "0.825"
+      costPerMillionOutputTokens: "4.125"
+
+  # anthropic/claude-haiku-5.5 — fast Anthropic tier
+  - name: openrouter-claude-haiku-5-5
+    enabled: true
+    litellmModel: "anthropic/claude-haiku-5.5"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - fast
+      - cheap
+      - vision
+      - reasoning
+      - code
+      - long-context
+    latencyProfile: fast
+    constraints:
+      contextWindow: 1000000
+      maxOutputTokens: 128000
+      costPerMillionInputTokens: "0.1"
+      costPerMillionOutputTokens: "0.5"
+
+  # ── Frontier ──
+
+  # openai/gpt-6.1-terra — OpenAI mid tier
+  - name: openrouter-gpt-6-1-terra
+    enabled: true
+    litellmModel: "openai/gpt-6.1-terra"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - vision
+      - long-context
+    latencyProfile: medium
+    constraints:
+      contextWindow: 1050000
+      maxOutputTokens: 128000
+      costPerMillionInputTokens: "1"
+      costPerMillionOutputTokens: "5"
+
+  # x-ai/grok-4.7 — xAI flagship
+  - name: openrouter-grok-4-7
+    enabled: true
+    litellmModel: "x-ai/grok-4.7"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - vision
+      - long-context
+    latencyProfile: medium
+    constraints:
+      contextWindow: 500000
+      maxOutputTokens: 450000
+      costPerMillionInputTokens: "2"
+      costPerMillionOutputTokens: "6"
+
+  # qwen/qwen3.8-max-0902 — Qwen flagship
+  - name: openrouter-qwen3-8-max
+    enabled: true
+    litellmModel: "qwen/qwen3.8-max-0902"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - vision
+      - long-context
+    latencyProfile: medium
+    constraints:
+      contextWindow: 1000000
+      maxOutputTokens: 131072
+      costPerMillionInputTokens: "2"
+      costPerMillionOutputTokens: "6"
+
+  # moonshotai/kimi-k3.1-pro — strong agentic coding, 1M context
+  - name: openrouter-kimi-k3-1-pro
+    enabled: true
+    litellmModel: "moonshotai/kimi-k3.1-pro"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - vision
+      - long-context
+    latencyProfile: slow
+    constraints:
+      contextWindow: 1048576
+      maxOutputTokens: 943718
+      costPerMillionInputTokens: "2"
+      costPerMillionOutputTokens: "10"
+
+  # anthropic/claude-sonnet-5.5 — Anthropic workhorse
+  - name: openrouter-claude-sonnet-5-5
+    enabled: true
+    litellmModel: "anthropic/claude-sonnet-5.5"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - vision
+      - long-context
+    latencyProfile: medium
+    constraints:
+      contextWindow: 1000000
+      maxOutputTokens: 128000
+      costPerMillionInputTokens: "2"
+      costPerMillionOutputTokens: "10"
+
+  # anthropic/claude-opus-5.5 — Anthropic most capable
+  - name: openrouter-claude-opus-5-5
+    enabled: true
+    litellmModel: "anthropic/claude-opus-5.5"
+    baseURL: "https://openrouter.ai/api/v1"
+    credentialsRef:
+      existingSecret: "openrouter-api-key"
+      key: "api-key"
+    capabilities:
+      - reasoning
+      - code
+      - vision
+      - long-context
+    latencyProfile: slow
+    constraints:
+      contextWindow: 1000000
+      maxOutputTokens: 128000
+      costPerMillionInputTokens: "4"
+      costPerMillionOutputTokens: "20"
+
+  # ════════════════════════════════════════════════════════════════════════════
   # OpenAI
   # https://developers.openai.com/api/docs/models
   # ════════════════════════════════════════════════════════════════════════════
@@ -1050,10 +1481,107 @@ modelSelectors:
         weight: 60
       - name: openai-gpt-6-1-sol
         weight: 40
+      - name: openrouter-ling-3-0-flash
+        weight: 50
+      - name: openrouter-glm-5-3-flash
+        weight: 50
+      - name: openrouter-qwen3-7-flash
+        weight: 50
+      - name: openrouter-deepseek-v4-1-flash
+        weight: 50
+      - name: openrouter-nemotron-3-5-lightning
+        weight: 50
+      - name: openrouter-mercury-3
+        weight: 50
+      - name: openrouter-minimax-m3-1-flash
+        weight: 50
+      - name: openrouter-nemotron-3-5-super-vl
+        weight: 50
+      - name: openrouter-mimo-v2-6-pro
+        weight: 50
+      - name: openrouter-qwen3-8-27b
+        weight: 50
+      - name: openrouter-seed-2-0-code
+        weight: 50
+      - name: openrouter-glm-5-3
+        weight: 50
+      - name: openrouter-mistral-large-4
+        weight: 50
+      - name: openrouter-gemini-3-8-flash
+        weight: 50
+      - name: openrouter-claude-haiku-5-5
+        weight: 50
+      - name: openrouter-gpt-6-1-terra
+        weight: 50
+      - name: openrouter-grok-4-7
+        weight: 50
+      - name: openrouter-qwen3-8-max
+        weight: 50
+      - name: openrouter-kimi-k3-1-pro
+        weight: 50
+      - name: openrouter-claude-sonnet-5-5
+        weight: 50
+      - name: openrouter-claude-opus-5-5
+        weight: 50
     fallbackChain:
       - google-gemini-3-8-flash
       - anthropic-claude-haiku-5-5
       - openrouter-free
+
+  # openrouter-switchyard — NVIDIA NeMo Switchyard over the OpenRouter models.
+  # A small judge scores each task: an easy one starts on the cheap model, a hard
+  # one on the capable model, and the stage router escalates after repeated tool
+  # failures. When Switchyard cannot decide, the rule router picks from the
+  # providers below. See docs/switchyard-routing.md.
+  - name: openrouter-switchyard
+    enabled: true
+    strategy: switchyard
+    providers:
+      - name: openrouter-deepseek-v4-1-flash
+        weight: 100
+      - name: openrouter-claude-sonnet-5-5
+        weight: 100
+      - name: openrouter-glm-5-3-flash
+        weight: 0   # judge only, never answers
+      # Mid tier and alternates. Switchyard's composite algorithm routes to the
+      # capable and efficient targets below; these are the pool the rule router
+      # falls back on and the models the fallback chain can reach.
+      - name: openrouter-claude-haiku-5-5
+        weight: 60
+      - name: openrouter-gemini-3-8-flash
+        weight: 50
+      - name: openrouter-qwen3-7-flash
+        weight: 50
+      - name: openrouter-glm-5-3
+        weight: 40
+      - name: openrouter-mimo-v2-6-pro
+        weight: 40
+      - name: openrouter-gpt-6-1-terra
+        weight: 30
+      - name: openrouter-kimi-k3-1-pro
+        weight: 30
+    fallbackChain:
+      - openrouter-claude-sonnet-5-5
+      - openrouter-claude-haiku-5-5
+      - openrouter-gemini-3-8-flash
+      - openrouter-deepseek-v4-1-flash
+      - openrouter-qwen3-7-flash
+      - openrouter-free
+    capabilityRouting:
+      capable: openrouter-claude-sonnet-5-5
+      efficient: openrouter-deepseek-v4-1-flash
+      judge: openrouter-glm-5-3-flash
+    switchyard:
+      type: composite
+      classifier:
+        target: openrouter-glm-5-3-flash
+        base_threshold: 0.5
+        classify_trigger: user_turn
+        fail_open: true
+      stage:
+        capable_target: openrouter-claude-sonnet-5-5
+        efficient_target: openrouter-deepseek-v4-1-flash
+        confidence_threshold: 0.5
 
   # fast — lowest latency, optimised for interactive / high-volume workloads
   - name: fast

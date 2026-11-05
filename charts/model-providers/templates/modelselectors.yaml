@@ -29,6 +29,10 @@ spec:
   capabilityRouting:
     {{- toYaml .capabilityRouting | nindent 4 }}
   {{- end }}
+  {{- if .switchyard }}
+  switchyard:
+    {{- toYaml .switchyard | nindent 4 }}
+  {{- end }}
   {{- if .metaRouter }}
   metaRouter:
     {{- toYaml .metaRouter | nindent 4 }}

@@ -120,7 +120,7 @@ agent-orca-resources:
   # back-filling read content into the KB with _rag_ingest.
   agents:
     - name: senior-programmer
-      modelSelectorRef: "default"
+      modelSelectorRef: "openrouter-switchyard"
       disableClarify: true # fully autonomous — never blocks on a human
       systemPrompt: |
         You are a senior software engineer for the agent-orca project. You are precise,
@@ -180,6 +180,14 @@ agent-orca-resources:
         mode: readWrite      # readOnly would expose only fs_read_text_file
         writeApproval: true  # the bridge elicits user approval for every write
       knowledgeBases: []
+      # sandbox_exec (docs/sandbox-shell.md): runs get a per-run OpenShell sandbox for shell
+      # commands. The coder SandboxClass alone decides what it can reach. AgentDeployments
+      # (the chat pods) do not get the tool.
+      shell:
+        classRef: coder
+        image: "ghcr.io/heddles/agent-orca/dev-sandbox:v0.10.1"
+        workDir: /sandbox
+        maxTimeoutSeconds: 600
       runtime:
         ociRef: "ghcr.io/heddles/agent-orca/openai-reference:latest"
         framework: openai-compatible
