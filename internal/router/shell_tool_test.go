@@ -225,7 +225,7 @@ func TestSandboxExecErrors(t *testing.T) {
 		body    string
 		wantErr string
 	}{
-		{"not enabled", nil, `{"command":"ls"}`, 0, "", "not enabled"},
+		{"not given a sandbox shell", nil, `{"command":"ls"}`, 0, "", "not given a sandbox shell"},
 		{"bad arguments", &ShellConfig{}, `{`, 0, "", "invalid arguments"},
 		{"empty command", &ShellConfig{}, `{"command":"  "}`, 0, "", "command is required"},
 		{"rejected by the operator", &ShellConfig{}, `{"command":"ls"}`, http.StatusConflict, "the run has ended", "the run has ended"},

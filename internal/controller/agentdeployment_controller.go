@@ -708,6 +708,12 @@ func (r *AgentDeploymentReconciler) buildDeploymentRouterConfig( //nolint:gocycl
 	fsCfg, fsDefs := filesystemToolCfg(agent.Spec.Filesystem)
 	toolDefs = append(toolDefs, fsDefs...)
 
+	// sandbox_exec: the Agent is declared once, so the warm pods that serve it get
+	// the same shell tool a dedicated AgentRun pod gets. The sandbox belongs to the
+	// run a pod is claimed for, not to the pod.
+	shellCfg, shellDefs := shellToolCfg(agent.Spec.Shell)
+	toolDefs = append(toolDefs, shellDefs...)
+
 	// Resolve KnowledgeBases from Agent spec and inject _rag tools.
 	var kbConfigs []router.KnowledgeBaseConfig
 	for _, kbName := range agent.Spec.KnowledgeBases {
@@ -893,6 +899,7 @@ func (r *AgentDeploymentReconciler) buildDeploymentRouterConfig( //nolint:gocycl
 		LongTermMemory:             longTermMemory,
 		Hindsight:                  hindsightConfig(agent, r.HindsightURL),
 		Filesystem:                 fsCfg,
+		Shell:                      shellCfg,
 	}
 
 	// Per-tool-result token cap and loop guards. We deliberately seed sane defaults

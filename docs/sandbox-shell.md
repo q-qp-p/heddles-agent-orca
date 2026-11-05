@@ -115,8 +115,9 @@ operator restart. The router stops the job if the command times out or the run i
 
 ## Limitations
 
-- **AgentRuns only.** An AgentDeployment's pods have no per-run sandbox to attach to, so the
-  tool is not added to them.
+- **One sandbox per run, not per conversation.** A warm pod of an AgentDeployment gets the
+  tool too, but the sandbox belongs to the run the pod is claimed for. In a chat each message
+  is a new run, so files and installed tools from an earlier message are gone.
 - **Credentials only through the class.** There is no per-Agent git or secret setting for the
   shell; give the class a [credential](openshell-sandbox.md#class-credentials). A rotated
   `secretRef` Secret reaches the next run's sandbox, not a running one.

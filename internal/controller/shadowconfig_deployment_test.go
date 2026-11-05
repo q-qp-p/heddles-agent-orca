@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	agentorcav1alpha1 "github.com/heddles/agent-orca/api/v1alpha1"
+	"github.com/heddles/agent-orca/internal/router"
 )
 
 // The benchmark follows the Agent: an AgentDeployment of a covered Agent is
@@ -72,4 +73,52 @@ func TestBuildDeploymentRouterConfig_SamplesTheDeploymentsAgent(t *testing.T) {
 	if cfg.Shadow != nil || len(cfg.AuxProviders) != 0 {
 		t.Errorf("an uncovered Agent was sampled: %+v %+v", cfg.Shadow, cfg.AuxProviders)
 	}
+}
+
+// The Agent is declared once: a warm pod of a deployment gets the sandbox_exec
+// tool and its limits just as a dedicated AgentRun pod does.
+func TestBuildDeploymentRouterConfig_GivesWarmPodsTheShellTool(t *testing.T) {
+	agent := &agentorcav1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Name: "assistant-agent", Namespace: testDefaultNS},
+		Spec: agentorcav1alpha1.AgentSpec{
+			ModelSelectorRef: "sel",
+			Shell:            &agentorcav1alpha1.ShellAccessSpec{ClassRef: "coder", Image: "img", MaxTimeoutSeconds: 300},
+		},
+	}
+	deploy := &agentorcav1alpha1.AgentDeployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "assistant", Namespace: testDefaultNS},
+		Spec:       agentorcav1alpha1.AgentDeploymentSpec{AgentRef: agent.Name},
+	}
+	c := resolverClient(t, agent, deploy, nsSelector(nil), nsProvider("a"), nsProvider("b"))
+	r := &AgentDeploymentReconciler{Client: c}
+
+	cfg, err := r.buildDeploymentRouterConfig(context.Background(), deploy, agent, "sa", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Shell == nil || cfg.Shell.MaxTimeoutSeconds != 300 {
+		t.Fatalf("Shell = %+v, want the Agent's limit", cfg.Shell)
+	}
+	if !hasToolDef(cfg.ToolDefinitions, "sandbox_exec") {
+		t.Error("the warm pod's tool list has no sandbox_exec")
+	}
+
+	// An Agent without spec.shell gets neither.
+	agent.Spec.Shell = nil
+	cfg, err = r.buildDeploymentRouterConfig(context.Background(), deploy, agent, "sa", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Shell != nil || hasToolDef(cfg.ToolDefinitions, "sandbox_exec") {
+		t.Errorf("a shell was offered without spec.shell: %+v", cfg.Shell)
+	}
+}
+
+func hasToolDef(defs []router.ToolDefinition, name string) bool {
+	for _, d := range defs {
+		if d.Name == name {
+			return true
+		}
+	}
+	return false
 }

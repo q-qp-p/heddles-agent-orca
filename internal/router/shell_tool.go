@@ -114,7 +114,7 @@ type shellJobResult struct {
 // executeSandboxExec handles the sandbox_exec built-in tool.
 func (r *Router) executeSandboxExec(ctx context.Context, args string) string {
 	if r.cfg.Shell == nil {
-		return `{"error": "a sandbox shell is not enabled for this agent (Agent.spec.shell)"}`
+		return `{"error": "this pod was not given a sandbox shell (declared by Agent.spec.shell)"}`
 	}
 	var p struct {
 		Command        string `json:"command"`
